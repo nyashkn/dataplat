@@ -25,5 +25,9 @@ class PartitionExistsError(LakeError):
     """Registering files into a partition that already holds rows (would double-count)."""
 
 
+class PublishExistsError(LakeError):
+    """A publish target key already exists; write-once refuses the write unless overwrite=True."""
+
+
 class ParityError(DataplatError):
     """A derived artifact (graph) disagrees with the lake on a canary question; nothing was published."""

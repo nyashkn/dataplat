@@ -10,6 +10,11 @@ Read side (import anywhere)::
 Write side (``<pkg>.pipelines`` only, enforced by ``dataplat lint``)::
 
     from dataplat.lakecore.write import Writer
+
+Publish side (fixed-key documents outside table storage, e.g. rendered JSON snapshots; same
+``<pkg>.pipelines``-only rule)::
+
+    from dataplat.lakecore.publish import PublishTarget, publish_bytes, publish_documents
 """
 
 from dataplat.config import LakeConfig

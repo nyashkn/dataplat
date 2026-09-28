@@ -43,6 +43,7 @@ Pull convention updates later: `uvx copier update --trust`. Existing repo? See
 ```python
 from dataplat.lakecore import connect  # read side, anywhere
 from dataplat.lakecore.write import Writer  # write side, <pkg>.pipelines only
+from dataplat.lakecore.publish import PublishTarget, publish_bytes, publish_documents  # fixed-key documents, write-once
 from dataplat.checks import check, Verdict, Evidence, dirty_expr, measure_dirt, verify_repair, Rate
 from dataplat.checks import livefire  # assert_catches(check, clean, mutation)
 from dataplat.checks.hamilton import PanderaPolars  # Hamilton @check_output_custom validator
@@ -82,4 +83,4 @@ builds (real-ladybug), and the multi-process worker/CLI action flow.
 ## Decisions
 [docs/adr/](docs/adr/): single writer on DuckLake · DBOS · LinkML contracts · lint the architecture,
 not the craft · native graph + parity (Icebug findings) · namespaces · extension wheels · distribution
-(**pending your decision**) · telemetry to OpenObserve.
+(**pending your decision**) · telemetry to OpenObserve · publish primitive for fixed-key documents.
