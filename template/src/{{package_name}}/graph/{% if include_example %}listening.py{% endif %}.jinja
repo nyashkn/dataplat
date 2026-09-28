@@ -1,0 +1,50 @@
+"""Listening graph: listeners and songs, with a ``played`` relation (weighted by plays).
+
+The canaries include a backward traversal (``<-[:played]-``), the pattern that silently returned
+nothing on Icebug-backed tables (ADR 0005). Parity must hold before a graph is published.
+"""
+
+from dataplat.graph import Canary, GraphSpec, NodeSpec, RelSpec
+
+from {{ package_name }}.contracts._generated import tables
+
+E = tables.USAGE_EVENT.table
+KNOWN = "user_id IS NOT NULL AND song_id IS NOT NULL"
+
+SPEC = GraphSpec(
+    name="listening",
+    nodes=(
+        NodeSpec(
+            "listener", f"SELECT DISTINCT user_id FROM {E} WHERE {KNOWN}", "user_id", (("user_id", "STRING"),)
+        ),
+        NodeSpec(
+            "song", f"SELECT DISTINCT song_id FROM {E} WHERE {KNOWN}", "song_id", (("song_id", "INT64"),)
+        ),
+    ),
+    rels=(
+        RelSpec(
+            "played",
+            "listener",
+            "song",
+            f'SELECT user_id AS "from", song_id AS "to", count(*) AS plays FROM {E} WHERE {KNOWN} GROUP BY 1, 2',
+            (("plays", "INT64"),),
+        ),
+    ),
+    canaries=(
+        Canary(
+            "songs_per_listener",
+            sql=f"SELECT user_id, count(DISTINCT song_id) FROM {E} WHERE {KNOWN} GROUP BY 1",
+            cypher="MATCH (l:listener)-[:played]->(s:song) RETURN l.user_id, count(s)",
+        ),
+        Canary(
+            "listeners_per_song",
+            sql=f"SELECT song_id, count(DISTINCT user_id) FROM {E} WHERE {KNOWN} GROUP BY 1",
+            cypher="MATCH (s:song)<-[:played]-(l:listener) RETURN s.song_id, count(l)",
+        ),
+        Canary(
+            "total_plays",
+            sql=f"SELECT count(*) FROM {E} WHERE {KNOWN}",
+            cypher="MATCH ()-[p:played]->() RETURN sum(p.plays)",
+        ),
+    ),
+)

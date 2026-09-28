@@ -1,0 +1,89 @@
+# {{ project_name }}: agent guide
+
+Data pipelines, metrics and agent actions for {{ project_name }}, built on
+[dataplat](https://github.com/nyashkn/dataplat) conventions. Agents and humans work the same way:
+through `just`. Read `docs/project-facts.md` before touching data.
+
+## Commands
+
+`just` is pinned in the dev dependencies. If it is not on your PATH, run the same recipe as
+`uv run --frozen just <recipe>`; do not call the tools directly to get around a recipe.
+
+| | |
+|---|---|
+| `just setup` | install deps + git hooks (once per clone or worktree) |
+| `just fmt` | format and autofix |
+| `just lint` · `just imports` · `just typecheck` | static gates |
+| `just contracts` | regenerate `contracts/_generated/` after editing LinkML |
+| `just test` | tests affected by your change (fast loop) |
+| `just test-all` | full suite + live-fire gate |
+| `just census` | what the lake holds (counts only) |
+| `just cli ...` | the project CLI with `.env` loaded (`just cli --help`) |
+| `just ci` | everything CI runs. Run it before you say "done". |
+| `just worktree x` | your own branch + lake namespace for parallel work |
+| `just alerts` | the alerts this project defines (`--plan` compares with OpenObserve; `--apply` is the owner's) |
+| `just observe` | a local OpenObserve (Docker) for traces and logs; needs `OPENOBSERVE_*` in `.env` |
+
+## Where code goes
+
+```
+cli ─▶ pipelines | actions ─▶ semantic | graph ─▶ transforms | sources ─▶ contracts
+```
+Upper layers import lower ones; `|` siblings never import each other (`just imports`).
+
+| Layer | Holds | Must not |
+|---|---|---|
+| `contracts/` | LinkML (`tables.yaml`, `ontology.yaml`) → `_generated/` | be edited in `_generated/` |
+| `sources/` | readers for external systems → polars frames of strings | infer types, touch the lake, list storage |
+| `transforms/` | pure Hamilton functions + `@check` rules | do I/O, read env, import duckdb/dbos/pandas |
+| `semantic/` | BSL measures (each defined once) + gated questions | return a number without `dataplat.gate.answer` |
+| `graph/` | graph spec (SQL over the lake) + canaries | be a source of truth |
+| `actions/` | side effects via `dataplat.actions` (preconditions, approval, audit) | write the lake |
+| `pipelines/` | DBOS workflows: source → transforms → **one** `Writer` commit | commit twice in one step |
+| `cli/` | argparse wiring to function objects | dispatch on strings |
+
+## Enforced (you will get a message; fix the cause, don't work around it)
+
+- Only `pipelines/` writes the lake, via `dataplat.lakecore.write.Writer`. No `.write_parquet`,
+  `COPY ... TO`, `pq.write_table` or mutating SQL anywhere else (ruff TID251, `dataplat lint`
+  DPA001/002/004/007).
+- Never list storage (`os.listdir`, `glob`, `.rglob`, `fs.ls`, wildcard `read_parquet`). Ask the catalog
+  or use a manifest (TID251, DPA003).
+- No string dispatch: no `importlib.import_module(name)`, and Hamilton outputs are function objects
+  (TID251, DPA006).
+- Layers and purity: `just imports`, plus DPA008 (no files or env in `transforms/`).
+- You propose actions (`dataplat.actions.propose`); you never approve them. Approval is the owner's.
+- Generated contracts are fresh: `just contracts-check`.
+- Every registered `@check` has a live-fire test: `just test-all`.
+- No new duplicated code (jscpd ratchet vs main). Before writing a helper, call the jscpd MCP tool
+  `check_duplication` on it.
+
+## Judgment (no tool can check these, so they are on you)
+
+1. **Search before writing.** Use code search (gitnexus `query` if available, else grep) and extend
+   what exists.
+2. **Measured vs implied.** Every claim about data is either *measured* (command + snapshot id) or
+   *implied* (read from code). Say which.
+3. **Counts, rates, shape classes.** Never print, log or save a raw identifier (phone, user id,
+   national id). `dataplat.checks.shape_counts` exists for this.
+4. **Inconclusive is an answer.** A thin sample or a missing day is a refusal, not a guess. Blocked
+   metrics are NULL, never 0.
+5. **Grain before sums.** Know the grain (`dataplat.grain`) before any `SUM`. Ratios are `Rate(num, den)`.
+6. **Repairs keep a witness.** Derived columns are recomputed from an untouched raw column.
+7. **Thresholds are named constants** next to the check, with a comment saying where the number came from.
+8. **Surprises go in `docs/friction-log.md`.** Anything that recurs becomes a lint rule.
+
+## Parallel agents
+
+`just worktree x` creates `.trees/x` on branch `wt/x` with its own lake namespace (DuckLake metadata
+schema or catalog file, data prefix, DBOS app). A worktree can never resolve to the `main` namespace.
+Commits to `main` are blocked. Changes arrive by PR, gated by CI and `CODEOWNERS`.
+
+## More
+
+`docs/ARCHITECTURE.md` (the why) · `docs/CONVENTIONS.md` (every rule: tier, tool, origin) ·
+`docs/dont.md` · `docs/traps.md` (incidents behind the rules) · `agents/sops/` (lake operations)
+
+<!-- gitnexus:start -->
+<!-- gitnexus writes its code-intelligence section here when the repo is indexed. -->
+<!-- gitnexus:end -->

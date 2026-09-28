@@ -1,0 +1,8 @@
+name = "lake-repair"
+description = "Recompute a derived column from its untouched witness column for chosen partitions, verified against the pre-image, reversible."
+version = "1.0.0"
+max_concurrent = 1
+admission_policy = "hold"
+
+[[triggers]]
+type = "manual"

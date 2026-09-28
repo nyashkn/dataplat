@@ -1,0 +1,2 @@
+# Gitignored files copied into worktrees created by `claude --worktree` (local, non-secret settings).
+.env

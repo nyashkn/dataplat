@@ -1,0 +1,56 @@
+"""Adopt frozen history from a previous lake without rewriting a byte.
+
+A manifest (CSV: ``partition,file,rows``) lists every legacy Parquet file. It comes from the old
+system's own records, never from listing RustFS, which truncates at about 501 entries. Each partition is
+registered in its own transaction with its run-log row, then counted and compared with the manifest.
+
+    just cli register-frozen --table <schema.table> --manifest legacy.csv --tag migrate-2026-09
+"""
+
+from dataclasses import asdict
+from datetime import date
+from pathlib import Path
+from typing import Any
+
+import polars as pl
+from dataplat.contracts import TableContract
+from dataplat.errors import PartitionExistsError
+from dataplat.lakecore import Lake
+from dataplat.lakecore.write import Writer
+
+from {{ package_name }} import settings
+
+MANIFEST_SCHEMA = {"partition": pl.String, "file": pl.String, "rows": pl.Int64}
+
+
+def read_manifest(path: Path) -> pl.DataFrame:
+    df = pl.read_csv(path, schema=MANIFEST_SCHEMA)
+    if df["file"].str.contains(r"[*?\[]").any():
+        raise ValueError("manifest paths must be exact files, not globs")
+    return df
+
+
+def register_frozen(contract: TableContract, manifest: Path, *, run_tag: str) -> list[dict[str, Any]]:
+    """Register each manifest partition (skipping ones already present). Returns the receipts."""
+    m = read_manifest(manifest)
+    receipts = []
+    with Lake(settings.lake_config()) as lake:
+        writer = Writer(lake)
+        writer.ensure_table(contract)
+        for (part,), group in m.group_by("partition", maintain_order=True):
+            try:
+                receipt = writer.register_files(
+                    contract,
+                    date.fromisoformat(str(part)),
+                    group["file"].to_list(),
+                    run_id=f"{run_tag}:{part}",
+                    expected_rows=int(group["rows"].sum()),
+                    note=f"frozen history from {manifest.name}",
+                )
+            except PartitionExistsError:
+                receipts.append(
+                    {"dataset": contract.table, "partition": str(part), "mode": "skipped-present"}
+                )
+                continue
+            receipts.append(asdict(receipt))
+    return receipts

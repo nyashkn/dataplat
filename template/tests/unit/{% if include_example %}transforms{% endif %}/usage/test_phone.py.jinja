@@ -1,0 +1,34 @@
+import polars as pl
+import pytest
+
+from {{ package_name }}.transforms.usage.phone import normalize_phone, normalize_phone_expr
+
+from tests.fixtures.synthetic import phone_corpus
+
+
+@pytest.mark.parametrize(
+    ("raw", "clean"),
+    [
+        ("+255766000001", "255766000001"),  # leading plus (#160, #176)
+        ("255766000001.0", "255766000001"),  # float artifact (#197)
+        ("00255766000001", "255766000001"),  # international prefix
+        ("0712345678", "0712345678"),  # one leading zero is kept
+        ("a3f09c11d2", "a3f09c11d2"),  # hex identifiers are untouched
+        ("  255766000001 ", "255766000001"),
+        ("", None),
+        ("nan", None),
+        (None, None),
+        ("25.50", "25.50"),  # not an integral float: left alone, and V24 will flag it
+    ],
+)
+def test_normalize_phone_spec(raw: str | None, clean: str | None) -> None:
+    assert normalize_phone(raw) == clean
+
+
+def test_vectorized_matches_the_spec_on_every_shape() -> None:
+    corpus = phone_corpus()
+    vectorized = pl.DataFrame({"p": corpus}, schema={"p": pl.String}).select(
+        normalize_phone_expr(pl.col("p")).alias("p")
+    )["p"]
+    mismatches = [(i, v) for i, v in enumerate(vectorized.to_list()) if v != normalize_phone(corpus[i])]
+    assert mismatches == [], f"{len(mismatches)} rows disagree (first index {mismatches[:1]})"

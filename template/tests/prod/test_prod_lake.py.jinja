@@ -1,0 +1,37 @@
+"""Data checks against the production lake. On the box only: `just verify-prod` (owner-run, tailnet).
+
+CI never runs these. The lake is not reachable from GitHub, and data checks belong next to the data.
+"""
+
+from collections.abc import Iterator
+
+import polars as pl
+import pytest
+from dataplat.contracts import TableContract
+from dataplat.lakecore import Reader, connect
+from dataplat.trust import census, deep_census
+
+from {{ package_name }} import settings
+from {{ package_name }}.contracts._generated import tables
+
+pytestmark = pytest.mark.prod
+MAX_LAG_DAYS = 2  # daily datasets land by ~04:00 UTC; two days of lag means a run was missed
+
+
+@pytest.fixture(scope="module")
+def reader() -> Iterator[Reader]:
+    with connect(settings.lake_config(), read_only=True) as lake, lake.reader() as r:
+        yield r
+
+
+@pytest.mark.parametrize("contract", tables.ALL, ids=lambda c: c.table)
+def test_run_log_matches_table(reader: Reader, contract: TableContract) -> None:
+    mismatches = deep_census(reader, contract)
+    assert mismatches.height == 0, (
+        f"{mismatches.height} partitions disagree with the run log (snapshot {reader.snapshot})"
+    )
+
+
+def test_daily_datasets_are_fresh(reader: Reader) -> None:
+    stale = census(reader, tables.ALL).filter(pl.col("lag_days") > MAX_LAG_DAYS)
+    assert stale.height == 0, stale.select("dataset", "lag_days", "last_partition")

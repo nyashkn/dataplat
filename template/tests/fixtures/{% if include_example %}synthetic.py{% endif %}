@@ -1,0 +1,93 @@
+"""Synthetic usage rows: production-like *shapes*, fake values. Never copy real rows into tests.
+
+Shapes covered: telco phones with a leading +, ``.0`` float artifacts, ``00`` prefixes, hex identifiers,
+blanks; user ids in three encodings; lower-case and blank country codes.
+"""
+
+import csv
+import random
+from datetime import UTC, date, datetime, timedelta
+from pathlib import Path
+
+HEADER = (
+    "created_at",
+    "user_id",
+    "user_phone",
+    "song_id",
+    "country_iso",
+    "use_type",
+    "download_or_stream_count",
+    "supporting_details",
+)
+USE_TYPES = ("BD_TELCO_SUB", "PS_TELCO_DL", "WEB_STREAM", "APP_DOWNLOAD")
+
+
+def fake_phone(rng: random.Random) -> str:
+    base = f"2557{rng.randrange(10**8):08d}"
+    r = rng.random()
+    if r < 0.60:
+        return base
+    if r < 0.72:
+        return "+" + base  # issues #160/#176
+    if r < 0.84:
+        return base + ".0"  # issue #197
+    if r < 0.90:
+        return "00" + base
+    if r < 0.96:
+        return f"{rng.getrandbits(40):x}"  # hex identifier on BD telco rows
+    return ""
+
+
+def phone_corpus(n: int = 2000, seed: int = 1) -> list[str | None]:
+    rng = random.Random(seed)
+    extra: list[str | None] = [
+        None,
+        "",
+        "  ",
+        "nan",
+        "NaN",
+        "+",
+        "00",
+        "0",
+        "0712345678",
+        "+00255",
+        "255.0",
+        "25.50",
+    ]
+    return [fake_phone(rng) for _ in range(n)] + extra
+
+
+def usage_rows(day: date, n: int, seed: int = 0) -> list[dict[str, str]]:
+    rng = random.Random(f"{day.isoformat()}:{seed}")
+    users = (
+        [f"{rng.randrange(10**9)}" for _ in range(15)]
+        + [f"{rng.getrandbits(48):x}" for _ in range(15)]
+        + [f"u_{rng.randrange(10**6)}" for _ in range(10)]
+    )
+    rows = []
+    for _ in range(n):
+        use_type = rng.choice(USE_TYPES)
+        telco = use_type.startswith(("BD_TELCO_", "PS_TELCO_"))
+        ts = datetime(day.year, day.month, day.day, tzinfo=UTC) + timedelta(seconds=rng.randrange(86400))
+        rows.append(
+            {
+                "created_at": ts.strftime("%Y-%m-%d %H:%M:%S"),
+                "user_id": rng.choice(users),
+                "user_phone": fake_phone(rng) if telco else "",
+                "song_id": str(rng.randrange(1, 40)),
+                "country_iso": rng.choice(["TZ", "KE", "NG", "ug", ""]),
+                "use_type": use_type,
+                "download_or_stream_count": "1",
+                "supporting_details": "",
+            }
+        )
+    return rows
+
+
+def write_drop(drop_dir: Path, day: date, n: int = 200, seed: int = 0) -> Path:
+    path = drop_dir / f"usage_{day.isoformat()}.csv"
+    with path.open("w", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=HEADER)
+        w.writeheader()
+        w.writerows(usage_rows(day, n, seed))
+    return path

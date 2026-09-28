@@ -1,0 +1,354 @@
+"""Live-fire the guardrails: plant one violation per test in a sandbox copy of this project's config,
+and show the gate that should catch it does.
+
+A lint rule nobody has seen fail is only a claim. These tests prove every gate in docs/CONVENTIONS.md
+works against this repo's real ruff.toml, .importlinter, .jscpd.json, hooks and settings.
+"""
+
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import textwrap
+from pathlib import Path
+
+import pytest
+
+ROOT = Path(__file__).resolve().parents[2]
+PKG = "{{ package_name }}"
+LAYERS = ("contracts", "sources", "transforms", "semantic", "graph", "actions", "pipelines", "cli")
+BIN = Path(sys.executable).parent
+
+
+def run(
+    cmd: list[str], cwd: Path, stdin: str | None = None, env: dict[str, str] | None = None
+) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(cmd, cwd=cwd, input=stdin, capture_output=True, text=True, timeout=300, env=env)
+
+
+@pytest.fixture
+def sandbox(tmp_path: Path) -> Path:
+    """This project's guardrail config over an empty package skeleton."""
+    for name in ("pyproject.toml", "ruff.toml", ".importlinter", ".jscpd.json"):
+        shutil.copy(ROOT / name, tmp_path / name)
+    pkg = tmp_path / "src" / PKG
+    for layer in LAYERS:
+        (pkg / layer).mkdir(parents=True)
+        (pkg / layer / "__init__.py").write_text("")
+    (pkg / "__init__.py").write_text("")
+    (pkg / "settings.py").write_text("")
+    return tmp_path
+
+
+def plant(sandbox: Path, rel: str, code: str) -> Path:
+    path = sandbox / "src" / PKG / rel
+    path.write_text(textwrap.dedent(code))
+    return path
+
+
+def ruff(sandbox: Path) -> subprocess.CompletedProcess[str]:
+    return run([str(BIN / "ruff"), "check", "--no-cache", "--output-format", "concise", "src"], sandbox)
+
+
+def dataplat_lint(sandbox: Path) -> subprocess.CompletedProcess[str]:
+    return run([str(BIN / "dataplat"), "lint"], sandbox)
+
+
+def lint_imports(sandbox: Path) -> subprocess.CompletedProcess[str]:
+    env = {**os.environ, "PYTHONPATH": str(sandbox / "src")}
+    return run([str(BIN / "lint-imports"), "--no-cache"], sandbox, env=env)
+
+
+# ---------------------------------------------------------------- single writer
+def test_parquet_writes_outside_the_writer_are_caught(sandbox: Path) -> None:
+    plant(
+        sandbox,
+        "transforms/bad.py",
+        "import pyarrow.parquet as pq\n\ndef f(t, df):\n    pq.write_table(t, 'x.parquet')\n    df.write_parquet('y.parquet')\n",
+    )
+    assert "TID251" in ruff(sandbox).stdout
+    assert "DPA001" in dataplat_lint(sandbox).stdout
+
+
+def test_sql_file_writes_are_caught(sandbox: Path) -> None:
+    plant(
+        sandbox,
+        "semantic/bad.py",
+        "def f(con):\n    con.execute(\"COPY (SELECT 1) TO 'out.parquet' (FORMAT parquet)\")\n",
+    )
+    assert "DPA002" in dataplat_lint(sandbox).stdout
+
+
+def test_only_pipelines_may_import_the_writer(sandbox: Path) -> None:
+    plant(sandbox, "semantic/bad.py", "from dataplat.lakecore.write import Writer\n")
+    assert "DPA004" in dataplat_lint(sandbox).stdout
+    (sandbox / "src" / PKG / "semantic" / "bad.py").unlink()
+    plant(sandbox, "pipelines/ok.py", "from dataplat.lakecore.write import Writer\n")
+    assert dataplat_lint(sandbox).returncode == 0
+
+
+# ---------------------------------------------------------------- never list storage
+def test_listing_storage_is_caught(sandbox: Path) -> None:
+    plant(
+        sandbox,
+        "pipelines/bad.py",
+        "import os\nfrom pathlib import Path\n\ndef f():\n    os.listdir('/lake')\n    Path('/lake').rglob('*.parquet')\n",
+    )
+    assert "TID251" in ruff(sandbox).stdout
+    out = dataplat_lint(sandbox).stdout
+    assert out.count("DPA003") >= 2
+
+
+# ---------------------------------------------------------------- layers and purity
+def test_layer_breach_is_caught(sandbox: Path) -> None:
+    plant(sandbox, "transforms/bad.py", f"import {PKG}.pipelines\n")
+    out = lint_imports(sandbox)
+    assert out.returncode == 1 and "not allowed to import" in out.stdout
+
+
+def test_sibling_layers_stay_independent(sandbox: Path) -> None:
+    plant(sandbox, "semantic/bad.py", f"import {PKG}.graph\n")
+    assert lint_imports(sandbox).returncode == 1
+
+
+def test_transforms_stay_pure(sandbox: Path) -> None:
+    plant(sandbox, "transforms/bad.py", "import duckdb\n")
+    out = lint_imports(sandbox)
+    assert out.returncode == 1 and "Transforms are pure" in out.stdout
+    (sandbox / "src" / PKG / "transforms" / "bad.py").unlink()
+    plant(sandbox, "transforms/bad2.py", "from dataplat.lakecore import connect\n")
+    assert "DPA005" in dataplat_lint(sandbox).stdout
+
+
+def test_clean_skeleton_passes_every_static_gate(sandbox: Path) -> None:
+    plant(
+        sandbox,
+        "transforms/ok.py",
+        "import polars as pl\n\n\ndef double(x: pl.DataFrame) -> pl.DataFrame:\n    return x\n",
+    )
+    assert ruff(sandbox).returncode == 0
+    assert dataplat_lint(sandbox).returncode == 0
+    assert lint_imports(sandbox).returncode == 0
+
+
+# ---------------------------------------------------------------- no string dispatch
+def test_string_dispatch_is_caught(sandbox: Path) -> None:
+    plant(
+        sandbox, "cli/bad.py", "import importlib\n\ndef f(name):\n    return importlib.import_module(name)\n"
+    )
+    assert "TID251" in ruff(sandbox).stdout
+    plant(sandbox, "pipelines/bad.py", "def f(dr):\n    return dr.execute(['events_clean'])\n")
+    assert "DPA006" in dataplat_lint(sandbox).stdout
+
+
+# ---------------------------------------------------------------- duplication backstop
+@pytest.mark.needs_node
+def test_new_duplicate_code_fails_the_ratchet(sandbox: Path) -> None:
+    if shutil.which("npx") is None:
+        pytest.skip("node/npx not installed")
+    body = "\n".join(f"    total_{i} = sum(v * {i} for v in values if v > {i})" for i in range(12))
+    plant(sandbox, "transforms/a.py", f"def score_a(values):\n{body}\n    return total_1\n")
+    git = ["git", "-c", "user.email=t@t", "-c", "user.name=t"]
+    run([*git, "init", "-q", "-b", "main"], sandbox)
+    run([*git, "add", "-A"], sandbox)
+    run([*git, "commit", "-q", "-m", "base"], sandbox)
+    renamed = body.replace("total_", "acc_").replace("values", "items")
+    plant(sandbox, "semantic/b.py", f"def score_b(items):\n{renamed}\n    return acc_1\n")
+    out = run(
+        [
+            "npx",
+            "-y",
+            "jscpd@5.3.2",
+            "--config",
+            ".jscpd.json",
+            "--baseline-from-ref",
+            "main",
+            "--fail-on-new-clones",
+            "0",
+            "src",
+        ],
+        sandbox,
+    )
+    assert out.returncode == 1, out.stdout[-2000:]
+    assert "new clones" in (out.stdout + out.stderr)
+
+
+# ---------------------------------------------------------------- contracts
+def test_stale_generated_contracts_are_caught(tmp_path: Path) -> None:
+    shutil.copy(ROOT / "pyproject.toml", tmp_path / "pyproject.toml")
+    shutil.copytree(ROOT / "src" / PKG / "contracts", tmp_path / "src" / PKG / "contracts")
+    assert run([str(BIN / "dataplat"), "contracts", "check"], tmp_path).returncode == 0
+    yaml = tmp_path / "src" / PKG / "contracts" / "ontology.yaml"
+    yaml.write_text(yaml.read_text().replace("description:", "description: CHANGED", 1))
+    out = run([str(BIN / "dataplat"), "contracts", "check"], tmp_path)
+    assert out.returncode == 1 and "STALE" in out.stdout
+
+
+# ---------------------------------------------------------------- live-fire gate
+def test_a_check_without_live_fire_fails_the_suite(tmp_path: Path) -> None:
+    (tmp_path / "lfpkg").mkdir()
+    (tmp_path / "lfpkg" / "__init__.py").write_text("")
+    (tmp_path / "lfpkg" / "rules.py").write_text(
+        "import polars as pl\nfrom dataplat.checks import check\n\n@check\ndef never_fired() -> pl.Expr:\n"
+        "    '''x is positive.'''\n    return pl.col('x') > 0\n"
+    )
+    (tmp_path / "test_nothing.py").write_text("def test_ok():\n    assert True\n")
+    (tmp_path / "pytest.ini").write_text("[pytest]\ndataplat_check_packages = lfpkg\n")
+    out = run([sys.executable, "-m", "pytest", "-q", "--livefire-strict", "-p", "no:cacheprovider"], tmp_path)
+    assert out.returncode == 1 and "never_fired" in out.stdout
+
+
+# ---------------------------------------------------------------- agent hooks and permissions
+@pytest.mark.parametrize(
+    ("command", "blocked"),
+    [
+        ("printenv", True),
+        ("env | grep KEY", True),
+        ("cat .env", True),
+        ("infisical secrets list", True),
+        ("git push --force origin main", True),
+        ("git commit -n -m wip", True),
+        ("infisical run -- env", True),
+        ("echo $(env)", True),
+        ("sudo env", True),
+        ("export -p", True),
+        ("SKIP=gitleaks git commit -m wip", True),
+        ("git -c core.hooksPath=/dev/null commit -m wip", True),
+        ("git commit -nm wip", True),
+        ("{{ cli_name }} approve 1234", True),
+        ("just cli approve 1234", True),
+        ("uv run --frozen just cli approve 1234 --by me", True),
+        ("cat .env.example", False),
+        ("env DATAPLAT_NS=x just test", False),
+        ("just cli census", False),
+        ("just test", False),
+        ("git push --force-with-lease origin wt/feat", False),
+        ("uv run --frozen pytest -q", False),
+    ],
+)
+def test_bash_guard(command: str, blocked: bool) -> None:
+    payload = json.dumps({"tool_name": "Bash", "tool_input": {"command": command}})
+    out = run([sys.executable, str(ROOT / ".claude" / "hooks" / "guard_bash.py")], ROOT, stdin=payload)
+    assert (out.returncode == 2) is blocked, out.stderr
+
+
+def test_settings_deny_secret_reads() -> None:
+    settings = json.loads((ROOT / ".claude" / "settings.json").read_text())
+    deny = set(settings["permissions"]["deny"])
+    assert {"Read(.env)", "Bash(printenv)", "Bash(infisical secrets *)", "Bash(git push --force *)"} <= deny
+    hooks = settings["hooks"]
+    assert "guard_bash.py" in json.dumps(hooks["PreToolUse"]) and "post_edit.py" in json.dumps(
+        hooks["PostToolUse"]
+    )
+
+
+def test_post_edit_hook_reports_architecture_violations(sandbox: Path) -> None:
+    (sandbox / ".venv").symlink_to(ROOT / ".venv")
+    bad = plant(sandbox, "transforms/bad.py", "def f(df):\n    df.write_parquet('x.parquet')\n")
+    payload = json.dumps({"tool_name": "Write", "tool_input": {"file_path": str(bad)}})
+    env = {**os.environ, "CLAUDE_PROJECT_DIR": str(sandbox)}
+    out = run(
+        [sys.executable, str(ROOT / ".claude" / "hooks" / "post_edit.py")], sandbox, stdin=payload, env=env
+    )
+    assert out.returncode == 2 and "DPA001" in out.stderr
+
+
+# ---------------------------------------------------------------- lake mutations, purity, timezones
+def test_sql_mutations_outside_pipelines_are_caught(sandbox: Path) -> None:
+    plant(sandbox, "semantic/bad.py", "def f(con):\n    con.execute('DELETE FROM lake.usage.events_clean')\n")
+    assert "DPA007" in dataplat_lint(sandbox).stdout
+
+
+def test_io_inside_transforms_is_caught(sandbox: Path) -> None:
+    plant(sandbox, "transforms/bad.py", "import os\n\ndef f():\n    return os.environ['X'], open('f.csv')\n")
+    out = dataplat_lint(sandbox).stdout
+    assert out.count("DPA008") >= 2
+
+
+def test_naive_datetimes_are_caught(sandbox: Path) -> None:
+    plant(
+        sandbox, "pipelines/bad.py", "from datetime import datetime\n\ndef f():\n    return datetime.now()\n"
+    )
+    assert "DTZ005" in ruff(sandbox).stdout
+
+
+# ---------------------------------------------------------------- ownership and box-only checks
+def test_guardrails_are_owned_and_ask_before_edit() -> None:
+    owners = (ROOT / ".github" / "CODEOWNERS").read_text()
+    for path in (
+        "/ruff.toml",
+        "/.importlinter",
+        "/.jscpd.json",
+        "/justfile",
+        "/pyproject.toml",
+        "/.claude/",
+        "/tests/architecture/",
+    ):
+        assert path in owners, path
+    ask = set(json.loads((ROOT / ".claude" / "settings.json").read_text())["permissions"]["ask"])
+    assert {
+        "Edit(ruff.toml)",
+        "Edit(.importlinter)",
+        "Edit(justfile)",
+        "Edit(pyproject.toml)",
+        "Edit(tests/architecture/**)",
+    } <= ask
+
+
+def test_permission_rules_name_real_recipes() -> None:
+    """A renamed recipe must not silently drop out of the allow, ask or deny lists."""
+    just = BIN / "just"
+    if not just.exists():
+        pytest.skip("just not installed in the venv")
+    recipes = set(run([str(just), "--summary"], ROOT).stdout.split())
+    perms = json.loads((ROOT / ".claude" / "settings.json").read_text())["permissions"]
+    named = 0
+    for kind in ("allow", "ask", "deny"):
+        for rule in perms[kind]:
+            m = re.fullmatch(r"Bash\((?:uv run --frozen )?just(?: ([a-z][\w-]*))?.*\)", rule)
+            if m and m.group(1):
+                named += 1
+                assert m.group(1) in recipes, f"{kind}: {rule}"
+    assert named > 10
+    allowed = " ".join(perms["allow"])
+    assert "verify-prod" not in allowed and "worktree" not in allowed
+    assert {"Bash(just cli approve *)", "Bash(uv run --frozen just cli approve *)"} <= set(perms["deny"])
+
+
+def test_recipe_arguments_are_never_spliced_raw() -> None:
+    """A parameter pasted straight into a shell line re-splits on spaces and runs any shell syntax in it.
+    Recipes pass arguments through `[positional-arguments]` + "$@", or quote()."""
+    just = BIN / "just"
+    if not just.exists():
+        pytest.skip("just not installed in the venv")
+    dump = json.loads(run([str(just), "--dump", "--dump-format", "json"], ROOT).stdout)
+    raw = [
+        f"{name}({param['name']})"
+        for name, recipe in dump["recipes"].items()
+        for param in recipe["parameters"]
+        for line in recipe["body"]
+        for fragment in line
+        if fragment == [["variable", param["name"]]]
+    ]
+    assert raw == [], raw
+    assert "positional-arguments" in dump["recipes"]["cli"]["attributes"]
+
+
+def test_prod_checks_never_run_outside_the_box() -> None:
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("select_tests", ROOT / "scripts" / "select_tests.py")
+    assert spec and spec.loader
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    picked = mod.select(["tests/prod/test_prod_lake.py", f"src/{PKG}/pipelines/x.py"], ROOT)
+    assert not any(p.startswith("tests/prod") for p in picked)
+    env = {k: v for k, v in os.environ.items() if k != "DATAPLAT_ON_BOX"}
+    out = run(
+        [sys.executable, "-m", "pytest", "--collect-only", "-q", "-p", "no:cacheprovider", "tests"],
+        ROOT,
+        env=env,
+    )
+    assert "tests/prod" not in out.stdout

@@ -1,0 +1,87 @@
+# dataplat project template. Render:   uvx copier copy --trust gh:nyashkn/dataplat my-project
+# Pull later convention changes into a project:   uvx copier update --trust
+_min_copier_version: "9.4.0"
+_subdirectory: template
+_templates_suffix: .jinja
+_answers_file: .copier-answers.yml
+_message_after_copy: |
+  Rendered {{ project_name }}. Next:
+
+    cd {{ _copier_conf.dst_path }}
+    git init -b main            # skip if already a repo
+    cp .env.example .env        # local lake under .lake/ (gitignored)
+    uv tool install rust-just   # once per machine; without it, run every recipe as `uv run just <recipe>`
+    just bootstrap              # lockfile, deps, git hooks, generated contracts, formatting
+    git add -A && git commit -m "Render from dataplat" --no-verify   # the one commit made straight to main
+    just ci                     # every gate CI runs, locally
+
+  `just` lists the recipes. Then read AGENTS.md (the agent guide) and docs/ARCHITECTURE.md.
+
+project_name:
+  type: str
+  help: Human name of the project
+  default: Mdundo Platform
+
+package_name:
+  type: str
+  help: Python package (lowercase identifier)
+  default: "{{ project_name | lower | replace(' ', '_') | replace('-', '_') | replace('_platform', '') }}"
+  validator: >-
+    {% if package_name != (package_name | lower) or ' ' in package_name or '-' in package_name or package_name[:1] in '0123456789' %}
+    must be a lowercase python identifier
+    {% endif %}
+
+cli_name:
+  type: str
+  help: Command-line entry point name
+  default: "{{ package_name | replace('_', '-') }}"
+
+owner:
+  type: str
+  help: GitHub handle that owns the guardrails (CODEOWNERS)
+  default: "@nyashkn"
+
+python_version:
+  type: str
+  default: "3.12"
+  choices: ["3.12", "3.13"]
+
+dataplat_source:
+  type: str
+  help: How the project depends on dataplat
+  choices:
+    git (pinned tag; recommended): git
+    path (local checkout, for developing dataplat itself): path
+  default: git
+
+dataplat_git_url:
+  type: str
+  default: https://github.com/nyashkn/dataplat.git
+  when: "{{ dataplat_source == 'git' }}"
+
+dataplat_ref:
+  type: str
+  default: v0.1.0
+  when: "{{ dataplat_source == 'git' }}"
+
+dataplat_path:
+  type: str
+  default: ../dataplat
+  when: "{{ dataplat_source == 'path' }}"
+
+lake_data_path:
+  type: str
+  help: Production data prefix on RustFS (S3 API)
+  default: "s3://lake/{{ package_name }}/"
+
+forbidden_columns:
+  type: yaml
+  help: Column names that must never enter the lake (PII); a contract declaring one fails to generate
+  default: "[]"
+
+include_example:
+  type: bool
+  help: >-
+    Include the worked example (usage events: CSV source -> phone normalization -> V6/V21/V24
+    checks -> DBOS pipeline -> BSL metric behind the answer gate -> derived graph -> approved action)
+  default: true

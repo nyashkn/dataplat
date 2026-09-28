@@ -1,0 +1,15 @@
+"""The alerts this project defines build from its schedules: a schedule without a heartbeat is a run
+that can silently stop happening."""
+
+from dataplat.observe.alerts import standard_alerts
+
+from {{ package_name }} import settings
+from {{ package_name }}.pipelines.schedules import SCHEDULES
+
+
+def test_every_schedule_has_a_heartbeat() -> None:
+    alerts = standard_alerts(settings.APP_NAME, SCHEDULES)
+    names = {a.name for a in alerts}
+    assert len(names) == len(alerts) == 2 + len(SCHEDULES)
+    for schedule in SCHEDULES:
+        assert any(n.endswith(f"_heartbeat_{schedule['schedule_name']}") for n in names), schedule

@@ -1,0 +1,26 @@
+# dataplat library lint. Same philosophy as the project template: lint correctness and architecture,
+# not taste. Formatting is automatic (ruff format), so style is never a review topic.
+line-length = 120
+target-version = "py312"
+extend-exclude = ["template"]
+
+[lint]
+select = [
+  "E4", "E7", "E9",  # syntax / statement errors
+  "F",               # pyflakes: undefined names, unused imports
+  "B",               # bugbear: real bugs (mutable defaults, loop closures)
+  "I",               # import order (autofixed)
+  "UP",              # modern syntax (autofixed)
+  "TID",             # tidy imports: no relative imports
+  "DTZ",             # naive datetimes (partition dates move with the box's timezone)
+  "RUF100",          # unused noqa
+]
+
+[lint.flake8-tidy-imports]
+ban-relative-imports = "all"
+
+[lint.per-file-ignores]
+"tests/**" = ["DTZ"]
+
+[format]
+docstring-code-format = true

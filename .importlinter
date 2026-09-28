@@ -1,0 +1,31 @@
+[importlinter]
+root_package = dataplat
+include_external_packages = True
+
+[importlinter:contract:layers]
+name = dataplat layers (upper may import lower; siblings split by | are independent)
+type = layers
+layers =
+    dataplat.cli
+    dataplat.testing
+    dataplat.actions | dataplat.graph
+    dataplat.gate
+    dataplat.trust
+    dataplat.lakecore | dataplat.runtime
+    dataplat.observe
+    dataplat.contracts | dataplat.lint
+    dataplat.checks
+    dataplat.config
+    dataplat.isolation
+    dataplat.errors
+
+[importlinter:contract:pure-checks]
+name = checks and contracts do no I/O
+type = forbidden
+source_modules =
+    dataplat.checks
+    dataplat.contracts
+forbidden_modules =
+    duckdb
+    dbos
+    dataplat.lakecore

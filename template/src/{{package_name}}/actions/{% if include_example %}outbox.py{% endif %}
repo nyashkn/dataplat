@@ -1,0 +1,13 @@
+"""Where approved actions send their messages. Replace ``send`` with your CRM or email adapter.
+
+This stub makes no network call: it returns the message it would send, and DBOS records that return
+value in the action's audit trail. Keep adapters thin: build the payload, call the API, return its
+reference. A completed step never re-runs, but a step interrupted mid-call does. So pass
+``idempotency_key`` (the workflow id) to the API, and the second attempt becomes a no-op.
+"""
+
+from typing import Any
+
+
+def send(channel: str, payload: dict[str, Any], *, idempotency_key: str) -> dict[str, Any]:
+    return {"channel": channel, "queued": True, "idempotency_key": idempotency_key, "payload": payload}

@@ -1,0 +1,119 @@
+# Architecture
+
+{{ project_name }} is a data project that agents build and operate, with humans owning the boundaries.
+Every design choice below serves one of three goals:
+
+1. **One way to do each thing.** One writer, one definition per metric, one entrypoint (`just`). Agents
+   copy what they see, so there must be only one thing to copy.
+2. **Boundaries are code, not prose.** A rule either has a tool that fails, or it is marked
+   *judgment* in `CONVENTIONS.md`.
+3. **Every number can be traced.** Snapshot ids, run ids and code versions travel with the data.
+
+## The stack
+
+| Concern | Choice | Why this one |
+|---|---|---|
+| Storage | DuckLake: Postgres catalog + Parquet on RustFS (S3 API) | multi-table ACID commits, time travel, catalog knows every file (no listing) |
+| Query | DuckDB (+ ibis for the semantic layer) | in-process, fast on Parquet, one dialect |
+| Transforms | Apache Hamilton over polars | functions as DAG nodes: lineage for free, unit-testable |
+| Validation | pandera (polars) via LinkML-generated contracts | one declaration → DDL, schema check, value checks |
+| Orchestration | DBOS Transact | durable workflows in plain Python, Postgres-backed, approvals via `recv`/`send` |
+| Metrics | boring-semantic-layer + `dataplat.gate` | measures defined once; answers carry provenance or refuse |
+| Graph | LadybugDB native files, rebuilt from the lake | Cypher for relationship questions; parity-checked, never a source of truth |
+| Ontology | LinkML → Pydantic + JSON Schema | typed action inputs and tool schemas for agents |
+| Agents | Claude Code (hooks, skills, rules), ZeroClaw SOPs | same procedures, same gates |
+
+## Data flow
+
+```
+ external systems ──▶ sources/ (strings) ──▶ transforms/ (Hamilton, pure, validated)
+                                                  │
+                                                  ▼
+                               pipelines/ (DBOS step: ONE Writer commit)
+                                                  │  data + run-log row + commit message,
+                                                  ▼  one DuckLake transaction
+             ┌──────────────────────────── the lake (DuckLake) ────────────────────────────┐
+             │ Postgres catalog: tables, snapshots, _meta.dataset_runs                      │
+             │ RustFS: Parquet files (found through the catalog, never listed)              │
+             └─────────────┬──────────────────────────────┬─────────────────────────────────┘
+                           │ Reader pinned at snapshot N    │ nightly: build → parity → publish
+                           ▼                               ▼
+             semantic/ (BSL) ─▶ gate: Answer | Refusal   graph/ (LadybugDB file, read-only)
+                           │                               │
+                           └──────────▶ agents ◀───────────┘
+                                          │ propose
+                                          ▼
+                    actions/ (preconditions → human approval → effect once → audit)
+```
+
+## Guarantees and the mechanisms behind them
+
+| Guarantee | Mechanism |
+|---|---|
+| A partition exists iff its run-log row says it succeeded | data + `_meta.dataset_runs` row commit in one DuckLake transaction |
+| Re-running a pipeline never double-counts | partition overwrite (DELETE + INSERT, one txn) + deterministic DBOS workflow ids |
+| Two agents never corrupt one partition | DuckLake conflict detection; the loser retries on the new snapshot |
+| A reader sees one consistent state | `Lake.reader()` attaches at `SNAPSHOT_VERSION n` |
+| Nothing writes around the writer | ruff bans + `dataplat lint` DPA001–004, verified by `deep_census` on the box |
+| Empty partitions are deliberate | the writer refuses zero rows unless given `allow_empty` + a note |
+| Repairs are reversible | witness columns + `pre_snapshot` in the run log + `restore_partition` |
+| Metrics don't lie by omission | gate preconditions: complete windows, freshness, sample floors |
+| Agents can't leak restricted fields | `forbidden_columns` can't be declared; sources select explicit columns |
+| Parallel agents don't collide | worktree ⇒ own namespace (metadata schema, data prefix, DBOS app); `main` refused |
+| Telemetry can't leak identifiers | every span and log leaves through dataplat's scrubbing exporters (live-fired in dataplat's tests) |
+| A failure or a missed run reaches a human | alerts as code (`just alerts`): failures, new error signatures, one heartbeat per schedule |
+
+## Processes
+
+| Process | How many | DBOS role | Lake | Does |
+|---|---|---|---|---|
+| `{{ cli_name }} worker` | one per namespace, long-lived | `worker` (stable executor id, listens to queues) | read-write | schedules, proposed actions; recovers its own interrupted work after restart |
+| `{{ cli_name }} <command>` | any, short-lived | `cli` (ephemeral executor id, no queues) | read-write in pipelines, read-only for questions | runs one workflow to completion, or proposes/approves an action |
+| agent sessions (Q&A, MCP tools) | any | none, or `cli` to propose | `connect(read_only=True)` | reads at pinned snapshots, asks through the gate, proposes actions |
+
+An agent never executes a side effect itself. It proposes (`dataplat.actions.propose`). The worker runs
+the preconditions and waits. A human approves (`{{ cli_name }} approve <id> --by <name>`). The worker
+re-checks the preconditions and runs the effect step. A completed step never runs again. If the worker
+dies mid-step, the step re-runs on recovery, so adapters pass `DBOS.workflow_id` as an idempotency key.
+
+## Telemetry
+
+Off unless `OTEL_EXPORTER_OTLP_ENDPOINT` is set (tests force it off). When it is on, `launch()` installs
+OpenTelemetry trace and log providers before DBOS starts, and DBOS's own instrumentation does the rest:
+
+- every workflow and step is a span (`operation_name` = function name, `dbos.operation.type`,
+  `dbos.operation.workflow_id`); a failure sets the span to ERROR with the exception message;
+- DBOS logs a failed background workflow with its stack trace; warnings and errors from every other
+  logger go out too;
+- everything passes through `dataplat.observe.scrub` first: emails, UUIDs, 7+ digit runs and quoted
+  values become shapes (`+9{12}`), and each span carries `dataplat.error`, the failure's signature
+  (empty when it succeeded). Messages still carry counts and shapes only; scrubbing is the backstop.
+
+The resource names the process: `service.name` is the DBOS app name (`{{ package_name }}` on main,
+`{{ package_name }}-<ns>` in a worktree), plus `dataplat.namespace` and `dataplat.role`. All of a project's
+namespaces report into one OpenObserve stream (`{{ package_name }}`); only main's `service.name` pages.
+
+On the box, OpenObserve runs from `deploy/openobserve` (a Dokploy compose service, data on RustFS; its
+README has the steps). Locally, `just observe` starts one in Docker.
+
+`just alerts` prints the alerts this project defines: failed workflows (grouped by workflow and error
+signature, reported at most hourly), error signatures new in the last 7 days, and one heartbeat per
+schedule (no successful run within its cron interval plus grace). The owner applies them with
+`just alerts --apply --destination <name>`, an upsert by name that never deletes alerts it didn't make.
+
+## What runs where
+
+| Stage | Budget | Runs |
+|---|---|---|
+| Edit (Claude hook) | < 2 s | ruff format + fix, ruff check, `dataplat lint` on the edited file |
+| Write time (MCP) | on demand | jscpd `check_duplication`, code search |
+| pre-commit | < 10 s | ruff, `dataplat lint`, import contracts, contract freshness, gitleaks, no commits to main |
+| pre-push | < 1 min | impacted tests, duplication ratchet |
+| CI (PR, merge queue, main) | < 5 min | `just ci`: all static gates, full tests + live-fire, duplication ratchet |
+| Nightly | unbounded | full suite, lock drift, dependency audit, duplication report |
+| On the box (owner) | — | `just verify-prod`: run-log vs table agreement, freshness |
+
+## Decisions
+
+Platform decisions (DuckLake, DBOS, single writer, native graph over Icebug, namespaces, extension
+pinning) are recorded as ADRs in the dataplat repo. This project records its own in `docs/adr/`.

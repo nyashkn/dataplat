@@ -1,0 +1,8 @@
+name = "data-investigation"
+description = "Investigate a data question or anomaly with pinned snapshots, measured-vs-implied claims and counts-only reporting."
+version = "1.0.0"
+max_concurrent = 2
+admission_policy = "parallel"
+
+[[triggers]]
+type = "manual"

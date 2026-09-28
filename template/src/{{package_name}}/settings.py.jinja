@@ -1,0 +1,53 @@
+"""Process wiring: the one module that reads the environment.
+
+Transforms and contracts may not import this (import-linter). Everything else gets configuration here,
+so tests can point the whole project at a temporary lake by setting environment variables.
+"""
+
+import os
+from pathlib import Path
+
+from dataplat.config import LakeConfig
+from dataplat.runtime import Role
+
+APP_NAME = "{{ package_name }}"
+
+
+def lake_config() -> LakeConfig:
+    return LakeConfig.from_env()
+
+
+def dbos_system_url() -> str:
+    return os.environ.get("DBOS_SYSTEM_DATABASE_URL", "sqlite:///.lake/dbos.sqlite")
+
+
+def graph_dir() -> Path:
+    return Path(os.environ.get("GRAPH_DIR", ".lake/graphs"))
+
+
+def source_drop_dir() -> Path:
+    return Path(os.environ.get("SOURCE_DROP_DIR", ".lake/drop"))
+
+
+def launch_dbos(role: Role = "cli") -> None:
+    """Launch DBOS for this process.
+
+    ``cli`` (the default) is for short-lived commands: an ephemeral executor that runs its own workflows
+    to completion and dequeues nothing. ``worker`` is for the one long-lived process (``{{ cli_name }}
+    worker``) that executes schedules and proposed actions, and recovers its own work after a restart.
+    """
+    from dataplat.actions import action_queue
+    from dataplat.runtime import dbos_config, launch
+
+    cfg = lake_config()
+    launch(
+        dbos_config(
+            APP_NAME,
+            system_database_url=dbos_system_url(),
+            code_version=cfg.code_version,
+            namespace=cfg.namespace,
+            role=role,
+        ),
+        role=role,
+    )
+    action_queue(cfg.namespace)

@@ -1,0 +1,71 @@
+# OpenObserve for this box: traces and logs from the DBOS pipelines and agents (docs/ARCHITECTURE.md,
+# Telemetry). Deploy it in Dokploy as a Docker Compose service that points at this file, and set the
+# variables below in the service's Environment tab. Dokploy writes them to a .env next to this file on
+# the server; they never go into git. deploy/openobserve/README.md has the steps.
+#
+# Storage: Parquet in the box's RustFS (bucket OPENOBSERVE_BUCKET, created on first start). Metadata,
+# including the index of those Parquet files, and the write-ahead log live in the openobserve-data volume.
+# Back that volume up (Dokploy > Volume Backups): without it the bucket can't be read back.
+#
+# Access: the UI and the OTLP endpoint listen on OPENOBSERVE_BIND:5080 (default 127.0.0.1, the box
+# only). Set it to the box's tailnet IP to reach it from the tailnet. Don't give it a public domain.
+
+services:
+  bucket:
+    # one-shot: creates the bucket in RustFS if it is missing (S3 CreateBucket, SigV4, path-style)
+    image: curlimages/curl:8.11.1
+    restart: "no"
+    environment:
+      S3_ENDPOINT: ${RUSTFS_ENDPOINT:?set RUSTFS_ENDPOINT, e.g. http://rustfs:9000}
+      S3_REGION: ${RUSTFS_REGION:-us-east-1}
+      S3_ACCESS_KEY: ${RUSTFS_ACCESS_KEY:?set RUSTFS_ACCESS_KEY}
+      S3_SECRET_KEY: ${RUSTFS_SECRET_KEY:?set RUSTFS_SECRET_KEY}
+      S3_BUCKET: ${OPENOBSERVE_BUCKET:-openobserve}
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >-
+        sign="aws:amz:$$S3_REGION:s3";
+        url="$${S3_ENDPOINT%/}/$$S3_BUCKET";
+        if curl -fs -o /dev/null -I --aws-sigv4 "$$sign" --user "$$S3_ACCESS_KEY:$$S3_SECRET_KEY" "$$url";
+        then echo "bucket $$S3_BUCKET exists";
+        else curl -fsS -X PUT --aws-sigv4 "$$sign" --user "$$S3_ACCESS_KEY:$$S3_SECRET_KEY" "$$url"
+        && echo "bucket $$S3_BUCKET created"; fi
+    networks: [dokploy-network]
+
+  openobserve:
+    image: public.ecr.aws/zinclabs/openobserve:${OPENOBSERVE_VERSION:-v1.0.4}
+    restart: unless-stopped
+    depends_on:
+      bucket:
+        condition: service_completed_successfully
+    environment:
+      ZO_ROOT_USER_EMAIL: ${OPENOBSERVE_USER:?set OPENOBSERVE_USER (an email)}
+      ZO_ROOT_USER_PASSWORD: ${OPENOBSERVE_PASSWORD:?set OPENOBSERVE_PASSWORD}
+      ZO_DATA_DIR: /data
+      ZO_WEB_URL: ${OPENOBSERVE_WEB_URL:-http://localhost:5080}  # used in alert links
+      ZO_TELEMETRY: "false"  # no usage reporting to OpenObserve Inc.
+      ZO_COMPACT_DATA_RETENTION_DAYS: ${OPENOBSERVE_RETENTION_DAYS:-30}
+      # single node, data on RustFS
+      ZO_LOCAL_MODE: "true"
+      ZO_LOCAL_MODE_STORAGE: s3
+      ZO_S3_PROVIDER: s3
+      ZO_S3_SERVER_URL: ${RUSTFS_ENDPOINT}
+      ZO_S3_REGION_NAME: ${RUSTFS_REGION:-us-east-1}
+      ZO_S3_ACCESS_KEY: ${RUSTFS_ACCESS_KEY}
+      ZO_S3_SECRET_KEY: ${RUSTFS_SECRET_KEY}
+      ZO_S3_BUCKET_NAME: ${OPENOBSERVE_BUCKET:-openobserve}
+    ports:
+      - "${OPENOBSERVE_BIND:-127.0.0.1}:${OPENOBSERVE_PORT:-5080}:5080"
+    volumes:
+      - openobserve-data:/data
+    logging:
+      driver: json-file
+      options: {max-size: 10m, max-file: "3"}
+    networks: [dokploy-network]
+
+volumes:
+  openobserve-data:
+
+networks:
+  dokploy-network:
+    external: true

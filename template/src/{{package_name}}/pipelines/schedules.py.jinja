@@ -1,0 +1,32 @@
+"""What runs when, in one place. ``{{ cli_name }} worker`` applies these atomically (``DBOS.apply_schedules``).
+
+Times are UTC. The order follows data dependencies: upstream datasets land before anything built on them.
+``automatic_backfill``: if the box was down, missed runs are enqueued on startup. They reuse the
+scheduler's deterministic ids, and the pipelines' own workflow ids stop anything running twice.
+``just cli backfill --schedule NAME --start ... --end ...`` replays a window the same way.
+"""
+
+from dbos import ScheduleInput
+{%- if include_example %}
+
+from {{ package_name }}.pipelines import publish_graph, usage_daily
+
+SCHEDULES: list[ScheduleInput] = [
+    {
+        "schedule_name": "usage_daily",
+        "workflow_fn": usage_daily.usage_daily_scheduled,
+        "schedule": "20 3 * * *",
+        "cron_timezone": "UTC",
+        "automatic_backfill": True,
+    },
+    {
+        "schedule_name": "graph_publish",
+        "workflow_fn": publish_graph.graph_publish_scheduled,
+        "schedule": "40 4 * * *",
+        "cron_timezone": "UTC",
+    },
+]
+{%- else %}
+
+SCHEDULES: list[ScheduleInput] = []
+{%- endif %}

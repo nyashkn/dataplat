@@ -1,0 +1,23 @@
+# Register frozen history
+
+Legacy partitions are adopted in place: the catalog points at the existing files, which are never copied
+or rewritten.
+
+## Steps
+
+1. **Manifest** — Build `partition,file,rows` from the old system's own records (its run logs or
+   write receipts). Never from listing RustFS: listings truncate at about 501 entries. Paths must be
+   exact files in a `key=value/` hive layout.
+   - tools: shell
+2. **Rehearse** — In a worktree namespace, run `just cli register-frozen --table <schema.table> --manifest
+   <file> --tag migrate-<date>`. Every partition must register with `rows == manifest rows`. Partitions
+   already present are skipped, never doubled.
+   - tools: shell
+   - on_failure: fail
+3. **Approval** — Show the owner the receipt summary: partitions, rows, skipped.
+   - kind: approval
+   - requires_confirmation: true
+4. **Apply and census** — The owner runs it against production, then `just census`. Frozen partitions
+   show `mode=register` in the run log.
+   - tools: shell
+   - terminal: true

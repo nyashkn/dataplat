@@ -1,0 +1,23 @@
+# 0001. Follow the dataplat conventions
+
+- Status: accepted
+
+## Context
+
+{{ project_name }} is built and operated mostly by coding agents, sometimes in parallel. Conventions
+held only in prose drift; conventions encoded as tools hold.
+
+## Decision
+
+Render this repo from the dataplat template and depend on the dataplat library, pinned to a tag.
+Platform decisions (single writer on DuckLake, DBOS runtime, LinkML contracts, native graph with parity,
+namespaces per worktree, extension pinning) are recorded in dataplat's ADRs. This directory records
+decisions specific to {{ project_name }}.
+
+Convention updates arrive with `uvx copier update --trust`. Library updates arrive by bumping the
+dataplat tag in `pyproject.toml` and running `uv lock --upgrade-package dataplat`.
+
+## Consequences
+
+Guardrail changes go upstream to dataplat when they apply to every project, or here (owner-reviewed)
+when they are specific to this one.

@@ -1,0 +1,26 @@
+# Backfill a date range
+
+Re-runs the normal pipeline day by day. Never a bespoke script: the pipeline is the only writer.
+
+## Steps
+
+1. **Scope** — From the census, list the exact days (missing or suspect) and the pipeline that owns the
+   dataset. Confirm the source exists for each day (drop file, API window) before running anything.
+   - tools: shell
+2. **Worktree rehearsal** — In a worktree (`just worktree backfill-<dataset>`), run the pipeline for
+   the first two days and check the receipts: rows, dirt stats, snapshot.
+   - tools: shell
+   - on_failure: fail
+3. **Approval** — Show the owner the day list, the rehearsal receipts and the exact production command.
+   Production runs are the owner's.
+   - kind: approval
+   - requires_confirmation: true
+4. **Run** — The owner replays the schedule over the window:
+   `just cli backfill --schedule <name> --start <ISO> --end <ISO>`. The window is in *fire
+   times*: each daily run processes the day before it fires, so a window of 09-03..09-05 processes 09-02
+   and 09-03. For a single day: `just cli run-usage-daily --day D`. Days that already succeeded are
+   no-ops because the workflow ids are deterministic. Use `--attempt rN` only to recompute on purpose.
+   - tools: shell
+5. **Verify** — Re-run the census. Every scoped day is present, has rows, and matches the run log.
+   - tools: shell
+   - terminal: true

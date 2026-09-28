@@ -1,0 +1,43 @@
+"""Live-fire: each rule is shown catching the incident it is named after (``just test-all`` requires it)."""
+
+from datetime import date
+
+import polars as pl
+import pytest
+from dataplat.checks import livefire as lf
+
+from {{ package_name }}.transforms.usage import checks
+from {{ package_name }}.transforms.usage.events import events_clean, events_typed
+
+from tests.fixtures.synthetic import usage_rows
+
+DAY = date(2026, 9, 1)
+
+
+@pytest.fixture(scope="module")
+def clean() -> pl.DataFrame:
+    raw = pl.DataFrame(usage_rows(DAY, 300), schema=dict.fromkeys(usage_rows(DAY, 1)[0], pl.String))
+    return events_clean(events_typed(raw))
+
+
+def test_clean_batch_satisfies_the_contract(clean: pl.DataFrame) -> None:
+    checks.USAGE_EVENT.validate(clean)
+
+
+def test_v6_catches_phone_on_non_telco_row(clean: pl.DataFrame) -> None:
+    non_telco = ~pl.col("use_type").str.starts_with("BD_TELCO_") & ~pl.col("use_type").str.starts_with(
+        "PS_TELCO_"
+    )
+    lf.assert_catches(
+        checks.v6_phone_only_on_telco,
+        clean,
+        lf.set_where("phone_number", "255700000009", non_telco, "non-telco rows"),
+    )
+
+
+def test_v21_catches_leading_plus(clean: pl.DataFrame) -> None:
+    lf.assert_catches(checks.v21_phone_no_leading_plus, clean, lf.add_leading_plus("phone_number"))
+
+
+def test_v24_catches_float_artifact(clean: pl.DataFrame) -> None:
+    lf.assert_catches(checks.v24_phone_no_dot, clean, lf.float_artifact("phone_number"))

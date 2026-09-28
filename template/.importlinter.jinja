@@ -1,0 +1,61 @@
+# Architecture contracts, checked by `just imports` (pre-commit, CI). Owner-reviewed.
+# Layers run top to bottom: a layer may import the ones below it, never the ones above.
+# Modules separated by | are siblings and must not import each other.
+# Rules on dataplat's own sub-modules (for example "only pipelines import dataplat.lakecore.write") are
+# enforced by `dataplat lint` (DPA004/DPA005). import-linter cannot target sub-modules of installed packages.
+
+[importlinter]
+root_package = {{ package_name }}
+include_external_packages = True
+
+[importlinter:contract:layers]
+name = Layers: cli > pipelines|actions > semantic|graph > transforms|sources > contracts
+type = layers
+layers =
+    {{ package_name }}.cli
+    {{ package_name }}.pipelines | {{ package_name }}.actions
+    {{ package_name }}.semantic | {{ package_name }}.graph
+    {{ package_name }}.transforms | {{ package_name }}.sources
+    {{ package_name }}.contracts
+
+[importlinter:contract:pure-transforms]
+name = Transforms are pure (polars in, polars out; no I/O, no orchestration, no env)
+type = forbidden
+source_modules =
+    {{ package_name }}.transforms
+forbidden_modules =
+    {{ package_name }}.settings
+    duckdb
+    dbos
+    httpx
+    requests
+    psycopg
+    sqlalchemy
+    boto3
+    s3fs
+    botocore
+    pandas
+
+[importlinter:contract:pure-contracts]
+name = Contracts are declarations (no I/O)
+type = forbidden
+source_modules =
+    {{ package_name }}.contracts
+forbidden_modules =
+    {{ package_name }}.settings
+    duckdb
+    dbos
+    httpx
+    requests
+    psycopg
+
+[importlinter:contract:storage-sdks]
+name = Only dataplat.lakecore talks to object storage
+type = forbidden
+source_modules =
+    {{ package_name }}
+forbidden_modules =
+    boto3
+    s3fs
+    botocore
+    minio

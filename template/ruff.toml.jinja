@@ -1,0 +1,47 @@
+# Lint correctness and architecture, not taste. Formatting is automatic (`just fmt`, the post-edit
+# hook, pre-commit), so style never needs review. Every rule here either prevents a real bug or holds
+# an architectural boundary. Each ban's message says what to do instead.
+# Owner-reviewed (CODEOWNERS): agents propose changes here, they do not make them.
+line-length = 110
+target-version = "py312"
+extend-exclude = ["src/*/contracts/_generated"]
+
+[lint]
+select = [
+  "E4", "E7", "E9",  # syntax and statement errors
+  "F",               # pyflakes: undefined names, unused imports/variables
+  "B",               # bugbear: mutable defaults, loop-variable closures, silent excepts
+  "I",               # import order (autofixed)
+  "UP",              # modern syntax (autofixed)
+  "TID",             # tidy imports: absolute imports only + the banned APIs below
+  "DTZ",             # naive datetimes: partition dates must not move with the box's timezone
+  "RUF100",          # unused noqa comments
+]
+
+[lint.isort]
+# Explicit, so import order never depends on whether contracts/_generated exists yet.
+known-first-party = ["{{ package_name }}"]
+known-local-folder = ["tests"]
+
+[lint.flake8-tidy-imports]
+ban-relative-imports = "all"
+
+[lint.flake8-tidy-imports.banned-api]
+"pyarrow.parquet".msg = "Parquet I/O goes through dataplat.lakecore: Writer to commit, Reader to read."
+"pyarrow.dataset".msg = "Parquet I/O goes through dataplat.lakecore: Writer to commit, Reader to read."
+"polars.read_parquet".msg = "Read lake tables through a Reader (pinned snapshot), not files."
+"polars.scan_parquet".msg = "Read lake tables through a Reader (pinned snapshot), not files."
+"duckdb.read_parquet".msg = "Read lake tables through a Reader (pinned snapshot), not files."
+"glob.glob".msg = "Never list storage (RustFS truncates listings at ~501 entries). Ask the catalog: Lake.files()."
+"glob.iglob".msg = "Never list storage (RustFS truncates listings at ~501 entries). Ask the catalog: Lake.files()."
+"os.listdir".msg = "Never list storage (RustFS truncates listings at ~501 entries). Ask the catalog: Lake.files()."
+"os.scandir".msg = "Never list storage (RustFS truncates listings at ~501 entries). Ask the catalog: Lake.files()."
+"os.walk".msg = "Never list storage (RustFS truncates listings at ~501 entries). Ask the catalog: Lake.files()."
+"importlib.import_module".msg = "No string dispatch: import the module or function directly so code search and renames see every use."
+
+[lint.per-file-ignores]
+"tests/**" = ["TID251", "DTZ"]
+"scripts/**" = ["TID251"]
+
+[format]
+docstring-code-format = true

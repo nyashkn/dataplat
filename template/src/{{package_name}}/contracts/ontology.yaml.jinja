@@ -1,0 +1,55 @@
+id: https://w3id.org/{{ package_name }}/ontology
+name: {{ package_name }}_ontology
+description: >-
+  The business entities agents reason about and act on. Generated into Pydantic models (action inputs,
+  tool schemas) and JSON Schema. Physical storage is described separately in tables.yaml.
+prefixes:
+  linkml: https://w3id.org/linkml/
+  {{ package_name }}: https://w3id.org/{{ package_name }}/
+default_prefix: {{ package_name }}
+default_range: string
+imports:
+  - linkml:types
+
+slots:
+{%- if include_example %}
+  artist_id:
+    description: Catalog artist reference.
+  song_id:
+    range: integer
+    description: Catalog song reference.
+  name: {}
+  title: {}
+  isrc:
+    description: >-
+      Recording code. NOT a key here: 62,338 distinct values across 68,074 rows, up to 9 songs per
+      code, and coverage fell from 2.80% to 0.56%.
+  reason:
+    required: true
+  requested_by:
+    required: true
+
+classes:
+  Artist:
+    description: A performer with songs in the catalog.
+    slots: [artist_id, name]
+    slot_usage:
+      artist_id: {identifier: true}
+  Song:
+    description: A recording in the catalog.
+    slots: [song_id, title, isrc, artist_id]
+    slot_usage:
+      song_id: {identifier: true}
+  ReviewRequest:
+    description: A request for the catalog team to review a song. Created by an approved action.
+    slots: [song_id, reason, requested_by]
+{%- else %}
+  entity_id:
+    identifier: true
+  name: {}
+
+classes:
+  Entity:
+    description: Placeholder. Replace with your domain's entities.
+    slots: [entity_id, name]
+{%- endif %}

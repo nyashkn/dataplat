@@ -1,0 +1,123 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "permissions": {
+    "allow": [
+      "Bash(just)",
+      "Bash(just --list)",
+      "Bash(just fmt)",
+      "Bash(just lint)",
+      "Bash(just imports)",
+      "Bash(just contracts)",
+      "Bash(just contracts-check)",
+      "Bash(just typecheck)",
+      "Bash(just test)",
+      "Bash(just test *)",
+      "Bash(just test-all)",
+      "Bash(just dupes)",
+      "Bash(just dupes *)",
+      "Bash(just dupes-report)",
+      "Bash(just census)",
+      "Bash(just ci)",
+      "Bash(just cli *)",
+      "Bash(just alerts)",
+      "Bash(just alerts --plan)",
+      "Bash(uv run --frozen just)",
+      "Bash(uv run --frozen just --list)",
+      "Bash(uv run --frozen just fmt)",
+      "Bash(uv run --frozen just lint)",
+      "Bash(uv run --frozen just imports)",
+      "Bash(uv run --frozen just contracts)",
+      "Bash(uv run --frozen just contracts-check)",
+      "Bash(uv run --frozen just typecheck)",
+      "Bash(uv run --frozen just test)",
+      "Bash(uv run --frozen just test *)",
+      "Bash(uv run --frozen just test-all)",
+      "Bash(uv run --frozen just dupes)",
+      "Bash(uv run --frozen just dupes *)",
+      "Bash(uv run --frozen just dupes-report)",
+      "Bash(uv run --frozen just census)",
+      "Bash(uv run --frozen just ci)",
+      "Bash(uv run --frozen just cli *)",
+      "Bash(uv run --frozen just alerts)",
+      "Bash(uv run --frozen just alerts --plan)",
+      "Bash(uv run --frozen pytest *)",
+      "Bash(uv run --frozen ruff *)",
+      "Bash(uv run --frozen dataplat *)",
+      "Bash(git status)",
+      "Bash(git diff *)",
+      "Bash(git log *)",
+      "Bash(git show *)"
+    ],
+    "ask": [
+      "Bash(just verify-prod)",
+      "Bash(uv run --frozen just verify-prod)",
+      "Bash(just worktree *)",
+      "Bash(uv run --frozen just worktree *)",
+      "Bash(just alerts --apply)",
+      "Bash(just alerts --apply *)",
+      "Bash(uv run --frozen just alerts --apply)",
+      "Bash(uv run --frozen just alerts --apply *)",
+      "Bash(just cli alerts --apply)",
+      "Bash(just cli alerts --apply *)",
+      "Bash(just observe)",
+      "Bash(just observe-down)",
+      "Bash(git push *)",
+      "Bash(infisical run *)",
+      "Edit(pyproject.toml)",
+      "Edit(tests/architecture/**)",
+      "Edit(ruff.toml)",
+      "Edit(.importlinter)",
+      "Edit(.jscpd.json)",
+      "Edit(.pre-commit-config.yaml)",
+      "Edit(justfile)",
+      "Edit(deploy/**)",
+      "Edit(.github/**)",
+      "Edit(.claude/**)",
+      "Edit(AGENTS.md)",
+      "Edit(CLAUDE.md)",
+      "Edit(docs/CONVENTIONS.md)"
+    ],
+    "deny": [
+      "Read(.env)",
+      "Read(.env.local)",
+      "Read(.env.prod)",
+      "Read(.env.production)",
+      "Read(.env.staging)",
+      "Read(**/*.pem)",
+      "Read(**/secrets/**)",
+      "Read(~/.aws/**)",
+      "Bash(printenv)",
+      "Bash(printenv *)",
+      "Bash(env)",
+      "Bash(env *)",
+      "Bash(infisical secrets *)",
+      "Bash(infisical export *)",
+      "Bash(git push --force *)",
+      "Bash(git push -f *)",
+      "Bash(git commit --no-verify *)",
+      "Bash(git commit -n *)",
+      "Bash({{ cli_name }} approve *)",
+      "Bash(uv run --frozen {{ cli_name }} approve *)",
+      "Bash(just cli approve *)",
+      "Bash(uv run --frozen just cli approve *)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          { "type": "command", "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/guard_bash.py\"" }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          { "type": "command", "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/post_edit.py\"" }
+        ]
+      }
+    ]
+  }
+}

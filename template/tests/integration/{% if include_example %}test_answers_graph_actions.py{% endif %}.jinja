@@ -1,0 +1,71 @@
+"""The read side (gated answers, derived graph) and the write side for agents (approved actions)."""
+
+import time
+from datetime import date
+from pathlib import Path
+from typing import Any
+
+import pytest
+from dataplat.actions import approve, audit, propose, status
+from dataplat.graph import open_current, query
+from dataplat.lakecore import connect
+
+from {{ package_name }} import settings
+from {{ package_name }}.actions import review
+from {{ package_name }}.pipelines import publish_graph, usage_daily
+from {{ package_name }}.semantic import answers
+
+from tests.fixtures.synthetic import write_drop
+
+D1, D2, D3 = date(2026, 9, 1), date(2026, 9, 2), date(2026, 9, 3)
+
+
+@pytest.fixture
+def two_days(project_env: Path, dbos_app: Any) -> Any:
+    for d, n in ((D1, 120), (D2, 80)):
+        write_drop(project_env / "drop", d, n=n)
+        usage_daily.run(d)
+    return dbos_app
+
+
+def test_answers_carry_provenance_or_refuse(two_days: Any) -> None:
+    with connect(settings.lake_config(), read_only=True) as lake, lake.reader() as r:
+        ok = answers.daily_events(r, D1, D2)
+        assert ok.ok and ok.value["events"].to_list() == [120, 80]
+        assert ok.provenance.snapshot == r.snapshot and ok.provenance.datasets == ("usage.events_clean",)
+        partial = answers.daily_events(r, D1, D3)  # D3 was never loaded
+        assert not partial.ok and "missing" in str(partial)
+        share = answers.telco_share(r, D1, D2)
+        assert share.ok and 0 < share.value < 1
+
+
+def test_graph_is_published_only_with_parity(two_days: Any) -> None:
+    waiting = publish_graph.graph_publish(
+        "2026-09-05"
+    )  # upstream day not loaded: waits on data, not the clock
+    assert waiting["status"] == "skipped" and waiting["evidence"]["verdict"] == "fail"
+    meta = publish_graph.graph_publish("2026-09-02")
+    assert meta["status"] == "published"
+    assert all(p["verdict"] == "pass" for p in meta["parity"])
+    conn, current = open_current(settings.graph_dir(), "listening")
+    assert current["snapshot"] == meta["snapshot"]
+    backward = query(conn, "MATCH (s:song)<-[:played]-(l:listener) RETURN count(DISTINCT s)")
+    assert backward[0][0] == meta["counts"]["song"]
+
+
+def test_action_waits_for_a_human_and_runs_once(two_days: Any) -> None:
+    dbos = two_days
+    wid = propose(review.flag_song_for_review, 3, "possible duplicate ISRC", "agent")
+    for _ in range(100):
+        if status(wid) == "pending_approval":
+            break
+        time.sleep(0.05)
+    assert status(wid) == "pending_approval"
+    approve(wid, by="owner")
+    result = dbos.retrieve_workflow(wid).get_result()
+    assert result["status"] == "done" and result["value"]["payload"]["song_id"] == 3
+    assert result["evidence"][0]["measured"]["plays"] > 0
+
+    refused = review.flag_song_for_review(999_999, "no such song", "agent")
+    assert refused["status"] == "refused"
+    assert {row["status"] for row in audit("catalog.flag_song_for_review")} == {"SUCCESS"}

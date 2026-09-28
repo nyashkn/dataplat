@@ -1,0 +1,252 @@
+"""``{{ cli_name }}``: thin wiring from commands to functions. Each subcommand binds a function object.
+
+Usage:
+    {{ cli_name }} census                    what the lake holds (counts only)
+    {{ cli_name }} worker                    apply schedules, run scheduled workflows until stopped
+    {{ cli_name }} backfill --schedule NAME --start ISO --end ISO    replay a schedule window
+    {{ cli_name }} audit [--action NAME]     action audit trail
+    {{ cli_name }} approve WORKFLOW_ID --by NAME [--reject] [--note TEXT]    (humans only)
+    {{ cli_name }} register-frozen --table SCHEMA.TABLE --manifest FILE --tag TAG
+{%- if include_example %}
+    {{ cli_name }} run-usage-daily --day D [--attempt TAG]
+    {{ cli_name }} daily-events --start D --end D
+    {{ cli_name }} telco-share --start D --end D
+    {{ cli_name }} publish-graph
+    {{ cli_name }} flag-song --song-id N --reason TEXT --by NAME
+{%- endif %}
+"""
+
+import argparse
+{%- if include_example %}
+import getpass
+{%- endif %}
+import json
+import os
+import sys
+import threading
+{%- if include_example %}
+from datetime import date, datetime
+{%- else %}
+from datetime import datetime
+{%- endif %}
+from pathlib import Path
+from typing import Any
+
+import polars as pl
+from dataplat.errors import DataplatError
+from dataplat.lakecore import connect
+from dataplat.trust import census
+
+from {{ package_name }} import settings
+{%- if include_example %}
+from {{ package_name }}.actions import review
+{%- endif %}
+from {{ package_name }}.contracts._generated import tables
+from {{ package_name }}.pipelines import migrate{% if include_example %}, publish_graph, usage_daily{% endif %}
+from {{ package_name }}.pipelines.schedules import SCHEDULES
+{%- if include_example %}
+from {{ package_name }}.semantic import answers
+{%- endif %}
+
+TABLES_BY_NAME = {t.table: t for t in tables.ALL}
+
+
+def _print(obj: Any) -> None:
+    if isinstance(obj, pl.DataFrame):
+        with pl.Config(tbl_rows=200, tbl_cols=20, tbl_width_chars=160):
+            print(obj)
+    else:
+        print(json.dumps(obj, indent=2, default=str))
+
+
+def _answer(result: Any) -> int:
+    if not result.ok:
+        print(result)
+        return 3
+    prov = result.provenance
+    print(f"# {result.question}  (snapshot {prov.snapshot}, code {prov.code_version})")
+    _print(result.value)
+    return 0
+
+
+def cmd_alerts(a: argparse.Namespace) -> int:
+    """The alerts this project defines; --plan compares them with OpenObserve, --apply upserts them."""
+    from dataplat.observe.alerts import standard_alerts
+    from dataplat.observe.openobserve import OpenObserve, apply
+
+    alerts = standard_alerts(settings.APP_NAME, SCHEDULES)
+    if not (a.plan or a.apply):
+        for alert in alerts:
+            window = f"every {alert.frequency_minutes} min over {alert.period_minutes} min"
+            print(f"{alert.name}  ({alert.stream_type}/{alert.stream}, {window})\n    {alert.description}")
+        print("\n`just alerts --plan` compares these with OpenObserve; `--apply` creates or updates them.")
+        return 0
+    plan = apply(OpenObserve.from_env(), alerts, a.destination, dry_run=not a.apply)
+    print("\n".join(plan.lines()) or "nothing to do")
+    return 0
+
+
+def cmd_census(a: argparse.Namespace) -> int:
+    with connect(settings.lake_config(), read_only=True) as lake, lake.reader() as r:
+        print(f"# census at snapshot {r.snapshot} (namespace {r.cfg.namespace})")
+        _print(census(r, tables.ALL))
+    return 0
+
+
+def cmd_worker(a: argparse.Namespace) -> int:
+    from dbos import DBOS
+
+    settings.launch_dbos(role="worker")
+    DBOS.apply_schedules(SCHEDULES)
+    names = ", ".join(s["schedule_name"] for s in SCHEDULES) or "none"
+    print(f"worker running schedules: {names}; Ctrl-C to stop", file=sys.stderr)
+    threading.Event().wait()
+    return 0
+
+
+def cmd_backfill(a: argparse.Namespace) -> int:
+    from dbos import DBOS
+
+    settings.launch_dbos()
+    DBOS.apply_schedules(SCHEDULES)
+    start, end = datetime.fromisoformat(a.start), datetime.fromisoformat(a.end)
+    handles = DBOS.backfill_schedule(a.schedule, start, end)
+    for h in handles:
+        h.get_result()
+    print(f"{a.schedule}: {len(handles)} scheduled run(s) replayed")
+    return 0
+
+
+def cmd_audit(a: argparse.Namespace) -> int:
+    from dataplat.actions import audit
+
+    settings.launch_dbos()
+    _print(audit(a.action))
+    return 0
+
+
+def cmd_approve(a: argparse.Namespace) -> int:
+    from dataplat.actions import approve
+
+    settings.launch_dbos()
+    decision = "rejected" if a.reject else "approved"
+    approve(a.workflow_id, by=a.by, decision=decision, note=a.note)
+    print(f"{decision}: {a.workflow_id}")
+    return 0
+
+
+def cmd_register_frozen(a: argparse.Namespace) -> int:
+    _print(migrate.register_frozen(TABLES_BY_NAME[a.table], Path(a.manifest), run_tag=a.tag))
+    return 0
+{%- if include_example %}
+
+
+def cmd_run_usage_daily(a: argparse.Namespace) -> int:
+    settings.launch_dbos()
+    _print(usage_daily.run(date.fromisoformat(a.day), attempt=a.attempt))
+    return 0
+
+
+def _gated_window(question: Any, a: argparse.Namespace) -> int:
+    """Ask a windowed question through the gate at one pinned snapshot, read-only."""
+    with connect(settings.lake_config(), read_only=True) as lake, lake.reader() as r:
+        return _answer(question(r, date.fromisoformat(a.start), date.fromisoformat(a.end)))
+
+
+def cmd_daily_events(a: argparse.Namespace) -> int:
+    return _gated_window(answers.daily_events, a)
+
+
+def cmd_telco_share(a: argparse.Namespace) -> int:
+    return _gated_window(answers.telco_share, a)
+
+
+def cmd_publish_graph(a: argparse.Namespace) -> int:
+    settings.launch_dbos()
+    _print(publish_graph.graph_publish())
+    return 0
+
+
+def cmd_flag_song(a: argparse.Namespace) -> int:
+    from dataplat.actions import propose
+
+    settings.launch_dbos()
+    wid = propose(review.flag_song_for_review, a.song_id, a.reason, a.by)
+    print(f"proposed {wid}: the worker checks preconditions, then a human decides:")
+    print(f"  just cli approve {wid} --by NAME   (or --reject)")
+    return 0
+{%- endif %}
+
+
+def build_parser() -> argparse.ArgumentParser:
+    fmt = argparse.RawDescriptionHelpFormatter
+    p = argparse.ArgumentParser(prog="{{ cli_name }}", description=__doc__, formatter_class=fmt)
+    sub = p.add_subparsers(dest="command", required=True)
+
+    sub.add_parser("census", help="what the lake holds (counts only)").set_defaults(func=cmd_census)
+    sub.add_parser("worker", help="apply schedules and run scheduled workflows").set_defaults(func=cmd_worker)
+    bf = sub.add_parser("backfill", help="replay a schedule over a window (already-run times are skipped)")
+    bf.add_argument("--schedule", required=True, choices=[s["schedule_name"] for s in SCHEDULES])
+    bf.add_argument("--start", required=True, help="ISO datetime with offset, e.g. 2026-09-01T00:00:00+00:00")
+    bf.add_argument("--end", required=True)
+    bf.set_defaults(func=cmd_backfill)
+    au = sub.add_parser("audit", help="action audit trail")
+    au.add_argument("--action")
+    au.set_defaults(func=cmd_audit)
+    ap = sub.add_parser("approve", help="approve (or --reject) a pending action: humans only")
+    ap.add_argument("workflow_id")
+    ap.add_argument("--by", required=True, help="your name, recorded in the audit trail")
+    ap.add_argument("--reject", action="store_true")
+    ap.add_argument("--note", default="")
+    ap.set_defaults(func=cmd_approve)
+    al = sub.add_parser("alerts", help="the alerts this project defines (OpenObserve)")
+    mode = al.add_mutually_exclusive_group()
+    mode.add_argument("--plan", action="store_true", help="compare with OpenObserve, change nothing")
+    mode.add_argument("--apply", action="store_true", help="create or update them in OpenObserve")
+    al.add_argument(
+        "--destination",
+        default=os.environ.get("OPENOBSERVE_ALERT_DESTINATION", "dataplat"),
+        help="an existing OpenObserve alert destination (email, Slack, Telegram, webhook)",
+    )
+    al.set_defaults(func=cmd_alerts)
+    rf = sub.add_parser("register-frozen", help="adopt legacy Parquet partitions from a manifest")
+    rf.add_argument("--table", required=True, choices=sorted(TABLES_BY_NAME))
+    rf.add_argument("--manifest", required=True)
+    rf.add_argument("--tag", required=True, help="run tag, e.g. migrate-2026-09")
+    rf.set_defaults(func=cmd_register_frozen)
+{%- if include_example %}
+
+    ud = sub.add_parser("run-usage-daily", help="materialize one day of usage events")
+    ud.add_argument("--day", required=True)
+    ud.add_argument("--attempt", default=None)
+    ud.set_defaults(func=cmd_run_usage_daily)
+    for name, fn, help_ in (
+        ("daily-events", cmd_daily_events, "events per day (gated)"),
+        ("telco-share", cmd_telco_share, "telco share of events (gated)"),
+    ):
+        q = sub.add_parser(name, help=help_)
+        q.add_argument("--start", required=True)
+        q.add_argument("--end", required=True)
+        q.set_defaults(func=fn)
+    pg = sub.add_parser("publish-graph", help="rebuild, parity-check and publish the listening graph")
+    pg.set_defaults(func=cmd_publish_graph)
+    fs = sub.add_parser("flag-song", help="propose a catalog review (needs approval)")
+    fs.add_argument("--song-id", type=int, required=True)
+    fs.add_argument("--reason", required=True)
+    fs.add_argument("--by", default=getpass.getuser())
+    fs.set_defaults(func=cmd_flag_song)
+{%- endif %}
+    return p
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+    try:
+        return int(args.func(args))
+    except DataplatError as e:  # expected, explained failures: the message says what to do
+        print(f"error: {e}", file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

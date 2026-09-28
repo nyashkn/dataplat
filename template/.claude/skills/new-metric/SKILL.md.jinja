@@ -1,0 +1,19 @@
+---
+name: new-metric
+description: Add or change a metric or answerable question (BSL measure + answer-gate preconditions). Use when asked for a KPI, a number, a dashboard figure or a "how many / what share" question.
+---
+
+# Add a metric
+
+1. **One definition.** A measure lives in exactly one semantic table in `src/{{ package_name }}/semantic/`.
+   Search for an existing measure first. Two definitions of "active users" is a bug, even if today they
+   agree.
+2. **Grain.** Know the table's grain (`dataplat.grain` in the contract). Never `SUM` across a grain you
+   have not checked (summing quote revisions turned $11k into $567k). Ratios are `Rate(num, den)`: sum the
+   parts, then divide. Never average ratios.
+3. **Blocked, not zero.** When the inputs are incomplete the answer is a `Refusal` (or NULL), never 0.
+   Declare that with preconditions: `partitions_complete`, `fresh_within`, `min_rows`.
+4. **Expose through the gate.** Add a function in `semantic/answers.py` that calls
+   `dataplat.gate.answer(question, reader=..., compute=..., preconditions=[...], datasets=[...])`.
+5. **Test both paths.** One test where the answer comes back with provenance (snapshot id), and one
+   where a missing partition makes it refuse.

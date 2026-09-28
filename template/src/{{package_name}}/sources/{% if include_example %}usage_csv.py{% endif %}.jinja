@@ -1,0 +1,35 @@
+"""Usage events from the daily CSV drop: one file per day, named by date, so nothing is ever listed.
+
+Every column is read as text. ``transforms.usage.events`` parses types explicitly, so a format change
+fails loudly instead of being guessed.
+"""
+
+from datetime import date
+from pathlib import Path
+
+import polars as pl
+
+COLUMNS = (
+    "created_at",
+    "user_id",
+    "user_phone",
+    "song_id",
+    "country_iso",
+    "use_type",
+    "download_or_stream_count",
+    "supporting_details",
+)
+
+
+def day_file(drop_dir: Path, day: date) -> Path:
+    return drop_dir / f"usage_{day.isoformat()}.csv"
+
+
+def read_day(drop_dir: Path, day: date) -> pl.DataFrame:
+    path = day_file(drop_dir, day)
+    if not path.is_file():
+        raise FileNotFoundError(f"no usage drop for {day}: expected {path.name} in the drop directory")
+    df = pl.read_csv(path, infer_schema=False)  # every column as text; blanks are handled in transforms
+    if tuple(df.columns) != COLUMNS:
+        raise ValueError(f"{path.name}: header {df.columns} != expected {list(COLUMNS)}")
+    return df

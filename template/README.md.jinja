@@ -1,0 +1,28 @@
+# {{ project_name }}
+
+Data pipelines, metrics and agent actions on the [dataplat](https://github.com/nyashkn/dataplat)
+conventions.
+
+```bash
+uv tool install rust-just   # once per machine; without it, prefix every recipe with `uv run`
+cp .env.example .env        # local lake under .lake/
+just bootstrap              # lockfile, deps, git hooks, generated contracts, formatting
+just ci                     # every gate CI runs
+{%- if include_example %}
+just cli --help             # the project CLI, with .env loaded
+{%- endif %}
+```
+
+Telemetry (optional): `just observe` starts a local [OpenObserve](https://github.com/openobserve/openobserve)
+and `just alerts` shows what would page you; see `docs/ARCHITECTURE.md` (Telemetry).
+
+Tasks run through [just](https://github.com/casey/just); `just` lists them. The copy pinned in the dev
+dependencies is the one CI and the git hooks call (`uv run --frozen just ...`).
+
+- **Agents:** start with [AGENTS.md](AGENTS.md).
+- **Why it's built this way:** [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+- **Every rule, its tier, and the incident behind it:** [docs/CONVENTIONS.md](docs/CONVENTIONS.md).
+- **Operating the lake:** [agents/sops/](agents/sops/).
+
+Production runs on the box. Secrets come from Infisical (`infisical run -- just ...`) and are never
+stored in files. Data checks against the production lake run only there (`just verify-prod`).

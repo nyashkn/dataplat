@@ -1,0 +1,40 @@
+from datetime import date
+
+import polars as pl
+import pytest
+from dataplat.checks import Verdict
+from dataplat.runtime import run_dag
+from hamilton.data_quality.base import DataValidationError
+
+from {{ package_name }}.transforms.usage import events
+
+from tests.fixtures.synthetic import HEADER, usage_rows
+
+DAY = date(2026, 9, 1)
+
+
+def raw_frame(n: int = 200) -> pl.DataFrame:
+    return pl.DataFrame(usage_rows(DAY, n), schema=dict.fromkeys(HEADER, pl.String))
+
+
+def test_dag_produces_contract_shaped_rows_and_measures_dirt() -> None:
+    out = run_dag(events, final=[events.events_clean, events.phone_dirt], inputs={"events_raw": raw_frame()})
+    clean, dirt = out[events.events_clean], out[events.phone_dirt]
+    assert clean.height == 200 and clean["event_date"].unique().to_list() == [DAY]
+    assert dirt.verdict is Verdict.PASS and dirt.measured["dirty"] > 0
+    assert "+9{12}" in dirt.measured["shapes_before"]  # shapes, never values
+    assert clean.filter(pl.col("country_iso") == "ZZ").height > 0  # blanks became the unknown code
+
+
+def test_a_changed_source_fails_loudly() -> None:
+    weighted = raw_frame().with_columns(pl.lit("2").alias("download_or_stream_count"))
+    with pytest.raises(DataValidationError, match="download_or_stream_count"):
+        run_dag(events, final=[events.events_clean], inputs={"events_raw": weighted})
+    bad_time = raw_frame().with_columns(pl.lit("01/09/2026 10:00").alias("created_at"))
+    with pytest.raises(Exception, match="(?i)conversion|parse|format"):
+        run_dag(events, final=[events.events_clean], inputs={"events_raw": bad_time})
+
+
+def test_outputs_are_requested_by_function_not_name() -> None:
+    with pytest.raises(TypeError, match="function object"):
+        run_dag(events, final=["events_clean"], inputs={"events_raw": raw_frame()})  # type: ignore[list-item]

@@ -1,0 +1,27 @@
+# environments and caches
+.venv/
+__pycache__/
+*.py[cod]
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.import_linter_cache/
+node_modules/
+report/
+
+# local lake, DBOS state, graphs, OpenObserve (dev); production lives in Postgres + RustFS
+.lake/
+.observe/
+*.ducklake
+*.ducklake.wal
+*.lbug
+
+# secrets never live in files; .env holds local, non-secret settings only
+.env
+.env.local
+*.pem
+
+# parallel agent workspaces
+.trees/
+.claude/worktrees/
+.claude/settings.local.json

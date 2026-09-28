@@ -1,0 +1,73 @@
+[project]
+name = "{{ package_name }}"
+version = "0.1.0"
+description = "{{ project_name }}: data pipelines, metrics and agent actions on the dataplat conventions"
+requires-python = ">={{ python_version }},<3.14"
+dependencies = [
+  "dataplat[semantic,graph,telemetry]",
+]
+
+[project.scripts]
+{{ cli_name }} = "{{ package_name }}.cli.main:main"
+
+[dependency-groups]
+dev = [
+  "dataplat[contracts]",
+  "pytest>=9.1",
+  "ruff==0.16.9",
+  "mypy>=2.3",
+  "import-linter>=2.15",
+  "pre-commit>=4.6",
+  "rust-just==1.58.0",  # `just` recipes; also installable globally: uv tool install rust-just
+]
+
+[tool.uv.sources]
+{% if dataplat_source == 'git' -%}
+dataplat = { git = "{{ dataplat_git_url }}", tag = "{{ dataplat_ref }}" }
+{%- else -%}
+dataplat = { path = "{{ dataplat_path }}", editable = true }
+{%- endif %}
+
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/{{ package_name }}"]
+
+# ---------------------------------------------------------------- dataplat conventions
+[tool.dataplat]
+package = "{{ package_name }}"
+# Never enters the lake. A contract that declares one of these fails `just contracts`.
+forbidden_columns = {{ forbidden_columns | tojson }}
+
+[tool.dataplat.contracts]
+tables = "src/{{ package_name }}/contracts/tables.yaml"
+tables_out = "src/{{ package_name }}/contracts/_generated/tables.py"
+ontology = "src/{{ package_name }}/contracts/ontology.yaml"
+ontology_out = "src/{{ package_name }}/contracts/_generated/ontology.py"
+ontology_jsonschema_out = "src/{{ package_name }}/contracts/_generated/ontology.schema.json"
+
+[tool.dataplat.lint]
+# Paths the architecture scanner skips (tests write fixtures; scripts are dev tooling).
+exempt = ["tests/*", "tests/**", "scripts/*"]
+
+# ---------------------------------------------------------------- tools
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-ra --strict-markers"
+dataplat_check_packages = ["{{ package_name }}"]
+markers = [
+  "needs_node: needs npx (jscpd); skipped when node is not installed",
+  "prod: runs against the production lake; only via `just verify-prod` on the box",
+]
+filterwarnings = ["ignore::DeprecationWarning"]
+
+[tool.mypy]
+python_version = "{{ python_version }}"
+files = ["src"]
+exclude = ["_generated/"]
+ignore_missing_imports = true
+check_untyped_defs = true
+warn_unused_ignores = true

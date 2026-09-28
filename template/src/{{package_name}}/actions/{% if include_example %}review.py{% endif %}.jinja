@@ -1,0 +1,32 @@
+"""Ask the catalog team to review a song. A worked example of a gated, approved, audited action.
+
+Precondition: the song has plays in the lake (checked at a pinned snapshot, with evidence).
+Approval: a human decides (``{{ cli_name }} approve <workflow_id> --by <name>``); nothing is sent before.
+Effect: one message to the review channel, sent with the workflow id as its idempotency key and
+recorded in the audit trail. Preconditions are checked again after approval.
+"""
+
+from typing import Any
+
+from dataplat.actions import action
+from dataplat.checks import Evidence, Verdict
+from dataplat.lakecore import connect
+from dbos import DBOS
+
+from {{ package_name }} import settings
+from {{ package_name }}.actions import outbox
+from {{ package_name }}.contracts._generated.ontology import ReviewRequest
+from {{ package_name }}.contracts._generated.tables import USAGE_EVENT
+
+
+def song_has_plays(song_id: int, reason: str, requested_by: str) -> Evidence:
+    with connect(settings.lake_config(), read_only=True) as lake, lake.reader() as r:
+        n = int(r.sql(f"SELECT count(*) AS n FROM {USAGE_EVENT.table} WHERE song_id = ?", [song_id])["n"][0])
+        snapshot = r.snapshot
+    return Evidence("song_has_plays", Verdict.PASS if n else Verdict.FAIL, {"plays": n, "snapshot": snapshot})
+
+
+@action("catalog.flag_song_for_review", preconditions=[song_has_plays])
+def flag_song_for_review(song_id: int, reason: str, requested_by: str) -> dict[str, Any]:
+    request = ReviewRequest(song_id=song_id, reason=reason, requested_by=requested_by)
+    return outbox.send("catalog-review", request.model_dump(), idempotency_key=str(DBOS.workflow_id))

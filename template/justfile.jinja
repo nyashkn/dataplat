@@ -1,0 +1,113 @@
+# One entrypoint for humans, agents and CI: the same recipes run everywhere.
+# `just` lists them. Install once per machine: `uv tool install rust-just` (or prefix: `uv run just ...`).
+# `.env` is loaded automatically; real environment variables (e.g. from Infisical) win over it.
+# Arguments reach commands intact: `"$@"` under [positional-arguments], or quote(). Never splice a
+# parameter raw into a shell line (it re-splits on spaces and runs any shell syntax inside it).
+# Owner-reviewed (CODEOWNERS).
+set dotenv-load := true
+set shell := ["bash", "-euo", "pipefail", "-c"]
+
+cli_name := "{{ cli_name }}"
+{% raw -%}
+run := "uv run --frozen"
+jscpd := "npx -y jscpd@5.3.2"
+openobserve_image := "public.ecr.aws/zinclabs/openobserve:v1.0.4"
+observe_container := "openobserve-" + cli_name
+# Comparison base for impacted tests and the duplication ratchet.
+default_base := `git rev-parse --verify -q origin/main >/dev/null 2>&1 && echo origin/main || echo main`
+
+# list recipes
+default:
+    @{{ just_executable() }} --list --unsorted
+
+# first run after rendering: deps, hooks, generated contracts, formatting
+bootstrap: setup contracts fmt
+
+# install deps (all extras) and git hooks; once per clone or worktree
+setup:
+    uv sync --all-extras
+    {{ run }} pre-commit install -t pre-commit -t pre-push
+
+# install exactly what uv.lock says (CI)
+setup-ci:
+    uv sync --locked --all-extras
+
+# the project CLI: just cli census | just cli run-usage-daily --day 2026-09-01
+[positional-arguments]
+cli *args:
+    {{ run }} {{ cli_name }} "$@"
+
+# format and autofix
+fmt:
+    {{ run }} ruff format .
+    {{ run }} ruff check --fix .
+
+# ruff plus the architecture scanner (DPA001-DPA008)
+lint:
+    {{ run }} ruff format --check .
+    {{ run }} ruff check .
+    {{ run }} dataplat lint
+
+# layer and purity contracts (import-linter)
+imports:
+    {{ run }} lint-imports
+
+# regenerate contracts/_generated from the LinkML sources
+contracts:
+    {{ run }} dataplat contracts gen
+
+# fail if generated contracts are stale
+contracts-check:
+    {{ run }} dataplat contracts check
+
+# mypy
+typecheck:
+    {{ run }} mypy
+
+# only the tests affected by changes vs base (the fast loop)
+test base=default_base:
+    {{ run }} pytest -q $({{ run }} python scripts/select_tests.py --base {{ quote(base) }})
+
+# full suite plus the live-fire gate (every registered check proven to catch bad rows)
+test-all:
+    {{ run }} pytest -q --livefire-strict
+
+# duplication ratchet: fail on NEW clones vs base (existing ones are the baseline)
+dupes base=default_base:
+    {{ jscpd }} --config .jscpd.json --baseline-from-ref {{ quote(base) }} --fail-on-new-clones 0 src
+
+# full duplication report
+dupes-report:
+    {{ jscpd }} --config .jscpd.json src
+
+# what the lake holds: partitions, gaps, zero-row days, lag (counts only)
+census:
+    {{ run }} {{ cli_name }} census
+
+# every gate CI runs
+ci: lint imports contracts-check typecheck test-all dupes
+
+# local OpenObserve (Docker) for traces and logs at http://localhost:5080; credentials from .env
+observe:
+    @[ -n "${OPENOBSERVE_USER:-}" ] && [ -n "${OPENOBSERVE_PASSWORD:-}" ] || { echo "set OPENOBSERVE_USER and OPENOBSERVE_PASSWORD in .env (see .env.example)"; exit 1; }
+    @docker start {{ observe_container }} >/dev/null 2>&1 || docker run -d --name {{ observe_container }} -p 5080:5080 -v "$PWD/.observe:/data" -e ZO_DATA_DIR=/data -e ZO_ROOT_USER_EMAIL="$OPENOBSERVE_USER" -e ZO_ROOT_USER_PASSWORD="$OPENOBSERVE_PASSWORD" {{ openobserve_image }} >/dev/null
+    @echo "OpenObserve on http://localhost:5080. Processes export to it when OTEL_EXPORTER_OTLP_ENDPOINT is set."
+
+# stop the local OpenObserve (its data stays in .observe/)
+observe-down:
+    docker stop {{ observe_container }}
+
+# the alerts this project defines: --plan compares with OpenObserve, --apply creates or updates them
+[positional-arguments]
+alerts *args:
+    {{ run }} {{ cli_name }} alerts "$@"
+
+# ON THE BOX ONLY: data checks against the production lake (owner-run, tailnet)
+verify-prod:
+    @test "${DATAPLAT_ON_BOX:-}" = "1" || { echo "verify-prod runs on the box (DATAPLAT_ON_BOX=1), never in CI or on a laptop"; exit 1; }
+    infisical run --env=prod -- {{ run }} pytest -q -m prod tests/prod
+
+# isolated workspace for a parallel agent: just worktree feat-x
+worktree name:
+    scripts/worktree_new.sh {{ quote(name) }}
+{%- endraw %}

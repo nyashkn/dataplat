@@ -1,0 +1,16 @@
+# Guardrails belong to a human. Agents may propose changes to these paths; the owner approves them.
+# Turn on "Require review from Code Owners" in the branch protection for main.
+/ruff.toml                  {{ owner }}
+/.importlinter              {{ owner }}
+/.jscpd.json                {{ owner }}
+/.pre-commit-config.yaml    {{ owner }}
+/justfile                   {{ owner }}
+/deploy/                    {{ owner }}
+/pyproject.toml             {{ owner }}
+/tests/architecture/        {{ owner }}
+/.github/                   {{ owner }}
+/.claude/                   {{ owner }}
+/AGENTS.md                  {{ owner }}
+/CLAUDE.md                  {{ owner }}
+/docs/CONVENTIONS.md        {{ owner }}
+/src/{{ package_name }}/contracts/  {{ owner }}

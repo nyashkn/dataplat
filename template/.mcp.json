@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "jscpd": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "jscpd@5.3.2", "--mcp", "--config", ".jscpd.json", "src"]
+    }
+  }
+}

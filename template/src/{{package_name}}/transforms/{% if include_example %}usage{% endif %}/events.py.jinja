@@ -1,0 +1,57 @@
+"""Usage events DAG (Hamilton). Each function is a node; parameter names are the edges.
+
+    events_raw (input, all strings) -> events_typed -> events_clean (validated, contract-shaped)
+                                                    -> phone_dirt   (how much normalization changed)
+
+No ``from __future__ import annotations`` here: Hamilton reads the real annotations.
+"""
+
+import polars as pl
+from dataplat.checks import Evidence, measure_dirt
+from dataplat.checks.hamilton import PanderaPolars
+from hamilton.function_modifiers import check_output_custom
+
+from {{ package_name }}.transforms.usage.checks import USAGE_EVENT
+from {{ package_name }}.transforms.usage.phone import normalize_phone_expr
+
+CREATED_AT_FORMAT = "%Y-%m-%d %H:%M:%S"  # usage CSV export format
+SOURCE_TIME_ZONE = "UTC"  # the export writes UTC; this decides which event_date a row lands in
+UNKNOWN_COUNTRY = "ZZ"
+
+
+def _blank_to_null(name: str) -> pl.Expr:
+    return pl.when(pl.col(name).str.strip_chars() == "").then(None).otherwise(pl.col(name))
+
+
+def events_typed(events_raw: pl.DataFrame) -> pl.DataFrame:
+    """Parse the all-string source frame. Explicit formats and strict casts: bad input fails loudly."""
+    return events_raw.select(
+        pl.col("created_at")
+        .str.to_datetime(CREATED_AT_FORMAT, time_unit="us", time_zone=SOURCE_TIME_ZONE, strict=True)
+        .alias("created_at"),
+        _blank_to_null("user_id").alias("user_id"),
+        _blank_to_null("user_phone").alias("phone_raw"),  # the witness: as received, never modified
+        _blank_to_null("song_id").cast(pl.Int64, strict=True).alias("song_id"),
+        _blank_to_null("country_iso")
+        .str.strip_chars()
+        .str.to_uppercase()
+        .fill_null(UNKNOWN_COUNTRY)
+        .alias("country_iso"),
+        pl.col("use_type").str.strip_chars().alias("use_type"),
+        pl.col("download_or_stream_count").cast(pl.Int64, strict=True).alias("download_or_stream_count"),
+        _blank_to_null("supporting_details").alias("supporting_details"),
+    )
+
+
+@check_output_custom(PanderaPolars(USAGE_EVENT.pandera_schema()))
+def events_clean(events_typed: pl.DataFrame) -> pl.DataFrame:
+    """Contract-shaped events. ``phone_number`` is derived from the untouched ``phone_raw`` witness."""
+    return events_typed.with_columns(
+        pl.col("created_at").dt.date().alias("event_date"),
+        normalize_phone_expr(pl.col("phone_raw")).alias("phone_number"),
+    ).select(USAGE_EVENT.column_names())
+
+
+def phone_dirt(events_typed: pl.DataFrame) -> Evidence:
+    """How many phones normalization changes (dirtiness = transform(v) != v), with shape classes."""
+    return measure_dirt(events_typed, "phone_raw", normalize_phone_expr)

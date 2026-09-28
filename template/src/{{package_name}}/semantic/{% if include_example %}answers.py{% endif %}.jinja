@@ -1,0 +1,63 @@
+"""Questions agents may ask, each behind the answer gate.
+
+An answer carries the snapshot it was computed at. When a precondition fails (a missing day, a
+zero-row partition, a thin sample), the caller gets a ``Refusal`` with the evidence, never a partial
+number.
+"""
+
+from datetime import date
+
+import polars as pl
+from dataplat.checks import Rate
+from dataplat.gate import Answer, Refusal, answer, min_rows, partitions_complete
+from dataplat.lakecore import Reader
+
+from {{ package_name }}.semantic.usage import EVENTS, usage_events
+
+MIN_EVENTS_FOR_SHARE = 30  # below this a telco share is noise; the gate answers INCONCLUSIVE
+
+
+def daily_events(reader: Reader, start: date, end: date) -> Answer[pl.DataFrame] | Refusal:
+    """Events per day between start and end (inclusive)."""
+
+    def compute(r: Reader) -> pl.DataFrame:
+        q = (
+            usage_events(r)
+            .filter(lambda t: (t.event_date >= start) & (t.event_date <= end))
+            .group_by("event_date")
+            .aggregate("events")
+        )
+        df = pl.from_pandas(q.execute())  # BSL returns pandas; restore the contract's Date type
+        return df.with_columns(pl.col("event_date").cast(pl.Date)).sort("event_date")
+
+    return answer(
+        f"usage events per day {start}..{end}",
+        reader=reader,
+        compute=compute,
+        preconditions=[partitions_complete(EVENTS, start, end)],
+        datasets=[EVENTS],
+    )
+
+
+def telco_share(reader: Reader, start: date, end: date) -> Answer[float | None] | Refusal:
+    """Share of events billed through telco channels. Built from sums of parts, NULL if no events."""
+
+    def compute(r: Reader) -> float | None:
+        q = (
+            usage_events(r)
+            .filter(lambda t: (t.event_date >= start) & (t.event_date <= end))
+            .aggregate("telco_events", "events")
+        )
+        row = pl.from_pandas(q.execute()).row(0, named=True)
+        return Rate(float(row["telco_events"] or 0), float(row["events"] or 0)).value
+
+    return answer(
+        f"telco share of usage events {start}..{end}",
+        reader=reader,
+        compute=compute,
+        preconditions=[
+            partitions_complete(EVENTS, start, end),
+            min_rows(EVENTS, start, end, MIN_EVENTS_FOR_SHARE),
+        ],
+        datasets=[EVENTS],
+    )

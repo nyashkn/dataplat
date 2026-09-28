@@ -1,0 +1,79 @@
+"""Map changed files to the tests that cover them: package-scoped test impact analysis.
+
+Deliberately conservative. When unsure, run everything; a skipped test that should have run costs
+more than a few extra seconds.
+
+    python scripts/select_tests.py --base origin/main     ->  prints pytest arguments
+
+- Shared config (pyproject, uv.lock, ruff, import contracts, conftest, contracts/, scripts/, .github/)
+  runs everything.
+- src/{{ package_name }}/<layer>/... runs tests/unit/<layer> plus tests/integration.
+- A changed test file runs itself, except tests/prod (box-only, via `just verify-prod`).
+- tests/architecture always runs; it is fast and guards the boundaries.
+"""
+
+import argparse
+import subprocess
+import sys
+from pathlib import Path
+
+PKG = "{{ package_name }}"
+EVERYTHING = (
+    "pyproject.toml",
+    "uv.lock",
+    "ruff.toml",
+    ".importlinter",
+    ".jscpd.json",
+    "justfile",
+    "tests/conftest.py",
+)
+EVERYTHING_PREFIXES = (
+    f"src/{PKG}/contracts/",
+    f"src/{PKG}/settings.py",
+    "scripts/",
+    ".github/",
+    "tests/fixtures/",
+)
+
+
+def changed(base: str) -> list[str] | None:
+    try:
+        out = subprocess.run(
+            ["git", "diff", "--name-only", f"{base}...HEAD"], capture_output=True, text=True, check=True
+        ).stdout
+        wip = subprocess.run(
+            ["git", "diff", "--name-only", "HEAD"], capture_output=True, text=True, check=True
+        ).stdout
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    return sorted({*out.split(), *wip.split()})
+
+
+def select(files: list[str] | None, root: Path) -> list[str]:
+    if files is None or any(f in EVERYTHING or f.startswith(EVERYTHING_PREFIXES) for f in files):
+        return ["tests"]
+    picks = {"tests/architecture"}
+    for f in files:
+        parts = Path(f).parts
+        if f.startswith("tests/prod/"):
+            continue  # production data checks run only on the box (just verify-prod)
+        if f.startswith("tests/") and f.endswith(".py"):
+            picks.add(f)
+        elif len(parts) >= 3 and parts[0] == "src" and parts[1] == PKG:
+            layer = parts[2] if len(parts) > 3 else None
+            if layer and (root / "tests" / "unit" / layer).is_dir():
+                picks.add(f"tests/unit/{layer}")
+            picks.add("tests/integration")
+    return sorted(p for p in picks if (root / p).exists())
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--base", default="origin/main")
+    a = ap.parse_args()
+    print(" ".join(select(changed(a.base), Path.cwd())) or "tests/architecture")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

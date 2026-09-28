@@ -1,0 +1,61 @@
+# Every PR, merge-queue entry and push to main runs the same `just` recipes agents and humans run
+# locally. Data checks against the real lake are NOT here: the lake is tailnet-only, so they run on
+# the box via `just verify-prod` (owner-run). Owner-reviewed (CODEOWNERS).
+name: ci
+
+on:
+  pull_request:
+  merge_group:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gates:
+    name: gates
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      # What "new" means for the duplication ratchet and impacted tests.
+      BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # the jscpd baseline and test selection read history
+
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          enable-cache: true
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+
+      # dataplat is a private git dependency? Add a fine-grained, read-only token as DATAPLAT_TOKEN:
+      # - run: git config --global url."https://x-access-token:${{ secrets.DATAPLAT_TOKEN }}@github.com/".insteadOf "https://github.com/"
+
+      - name: install (exactly uv.lock, including just)
+        run: uv sync --locked --all-extras
+
+      - name: static gates (ruff, architecture scanner, import contracts, contract freshness, types)
+        run: uv run --frozen just lint imports contracts-check typecheck
+
+      - name: tests
+        # Full suite + live-fire gate by default. When the suite gets slow, set the repo variable
+        # TEST_SELECTION=impacted to run only affected tests on PRs (merge queue and main stay full).
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ] && [ "${{ vars.TEST_SELECTION }}" = "impacted" ]; then
+            uv run --frozen just test "$BASE"
+          else
+            uv run --frozen just test-all
+          fi
+
+      - name: duplication ratchet (fails on new clones only)
+        if: env.BASE != '' && env.BASE != '0000000000000000000000000000000000000000'
+        run: uv run --frozen just dupes "$BASE"

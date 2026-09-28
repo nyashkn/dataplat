@@ -1,0 +1,63 @@
+"""End to end on a throwaway lake: CSV drop -> DAG -> one commit, under DBOS, twice."""
+
+from datetime import UTC, date, datetime
+from pathlib import Path
+from typing import Any
+
+import polars as pl
+from dataplat.lakecore import connect
+from dataplat.trust import census, deep_census
+
+from {{ package_name }} import settings
+from {{ package_name }}.contracts._generated import tables
+from {{ package_name }}.pipelines import usage_daily
+from {{ package_name }}.pipelines.schedules import SCHEDULES
+
+from tests.fixtures.synthetic import write_drop
+
+D1, D2 = date(2026, 9, 1), date(2026, 9, 2)
+
+
+def test_daily_pipeline_is_idempotent_and_logged(project_env: Path, dbos_app: Any) -> None:
+    write_drop(project_env / "drop", D1, n=120)
+    write_drop(project_env / "drop", D2, n=80)
+
+    first = usage_daily.run(D1)
+    again = usage_daily.run(D1)  # same workflow id: DBOS returns the recorded result, nothing re-runs
+    assert again == first and first["rows"] == 120
+    assert first["stats"]["phone_dirt"]["dirty"] > 0
+
+    usage_daily.run(D2)
+    redo = usage_daily.run(D1, attempt="r2")  # deliberate recompute: replaces the partition
+    assert redo["snapshot_id"] > first["snapshot_id"] and redo["rows"] == 120
+
+    with connect(settings.lake_config()) as lake, lake.reader() as r:
+        c = (
+            census(r, tables.ALL, today=date(2026, 9, 3))
+            .filter(pl.col("dataset") == "usage.events_clean")
+            .row(0, named=True)
+        )
+        assert (c["partitions"], c["rows"], c["zero_row_partitions"]) == (2, 200, 0)
+        assert deep_census(r, tables.USAGE_EVENT).height == 0  # run log agrees with the table
+        assert r.sql("SELECT count(*) AS n FROM usage.events_clean")["n"][0] == 200
+
+
+def test_backfill_replays_the_schedule_exactly_once(project_env: Path, dbos_app: Any) -> None:
+    for d in (D1, D2):
+        write_drop(project_env / "drop", d, n=50)
+    usage_daily.run(D1)  # already done manually: the backfill must not run it again
+    dbos_app.apply_schedules(SCHEDULES)
+    window = (
+        datetime(2026, 9, 2, tzinfo=UTC),
+        datetime(2026, 9, 4, tzinfo=UTC),
+    )  # fires 09-02 and 09-03 03:20
+    handles = dbos_app.backfill_schedule("usage_daily", *window)
+    for h in handles:
+        h.get_result()
+    assert len(handles) == 2
+    with connect(settings.lake_config()) as lake, lake.reader() as r:
+        log = r.runlog().filter(pl.col("dataset") == "usage.events_clean")
+        assert sorted(log["partition"].to_list()) == ["2026-09-01", "2026-09-02"]
+        assert (
+            r.sql("SELECT count(*) AS n FROM _meta.dataset_runs")["n"][0] == 2
+        )  # D1 committed once, not twice

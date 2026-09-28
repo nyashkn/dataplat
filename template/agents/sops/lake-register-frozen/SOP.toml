@@ -1,0 +1,8 @@
+name = "lake-register-frozen"
+description = "Adopt legacy hive-partitioned Parquet into the catalog without rewriting, from a manifest, with row-count reconciliation."
+version = "1.0.0"
+max_concurrent = 1
+admission_policy = "hold"
+
+[[triggers]]
+type = "manual"

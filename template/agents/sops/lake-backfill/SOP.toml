@@ -1,0 +1,8 @@
+name = "lake-backfill"
+description = "Backfill or recompute a date range of partitions through the normal pipeline (idempotent, one commit per day)."
+version = "1.0.0"
+max_concurrent = 1
+admission_policy = "hold"
+
+[[triggers]]
+type = "manual"

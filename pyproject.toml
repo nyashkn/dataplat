@@ -1,0 +1,72 @@
+[project]
+name = "dataplat"
+version = "0.1.0"
+description = "Platform library and conventions for agent-built data projects: one writer (DuckLake), durable runs (DBOS), pure transforms (Hamilton + pandera), gated answers."
+readme = "README.md"
+requires-python = ">=3.12,<3.14"
+license = { text = "UNLICENSED" }
+dependencies = [
+  # DuckDB and its extensions are pinned together: the extension wheels are built per DuckDB release,
+  # and they are loaded from the wheel by path (extensions.duckdb.org is never contacted at runtime).
+  "duckdb==1.5.5",
+  "duckdb-extension-ducklake==1.5.5",
+  "duckdb-extension-postgres-scanner==1.5.5",
+  "duckdb-extension-httpfs==1.5.5",
+  "polars>=1.44,<2",
+  "pyarrow>=25",
+  "pandera[polars]>=0.33,<0.34",
+  "apache-hamilton>=1.90,<2",
+  "dbos>=3.1,<4",
+]
+
+[project.optional-dependencies]
+semantic = ["boring-semantic-layer>=0.3.18,<0.4", "ibis-framework[duckdb]>=11,<12"]
+graph = ["real-ladybug>=0.15.3,<0.16"]
+contracts = ["linkml>=1.11,<2"]
+# OpenTelemetry traces and logs (OTLP/HTTP), e.g. to OpenObserve. Off unless OTEL_EXPORTER_OTLP_ENDPOINT is set.
+telemetry = ["dbos[otel]>=3.1,<4"]
+
+[project.scripts]
+dataplat = "dataplat.cli:main"
+
+[project.entry-points.pytest11]
+dataplat = "dataplat.testing.plugin"
+
+[dependency-groups]
+dev = [
+  "pytest>=9.1",
+  "ruff==0.16.9",
+  "mypy>=2.3",
+  "import-linter>=2.15",
+  "copier>=9.18",
+  "pre-commit>=4.6",
+  "pgserver>=0.1.4",
+  "rust-just==1.58.0",
+]
+
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/dataplat"]
+
+[tool.hatch.build.targets.sdist]
+exclude = ["template", "tests", "docs"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-ra --strict-markers"
+markers = [
+  "postgres: needs a local Postgres (pgserver); skipped when unavailable",
+  "graph: needs the graph extra (real-ladybug)",
+]
+filterwarnings = ["ignore::DeprecationWarning"]
+
+[tool.mypy]
+python_version = "3.12"
+ignore_missing_imports = true
+check_untyped_defs = true
+warn_unused_ignores = true
+files = ["src/dataplat"]

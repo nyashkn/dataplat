@@ -1,0 +1,73 @@
+id: https://w3id.org/{{ package_name }}/tables
+name: {{ package_name }}_tables
+description: >-
+  Physical lake tables. One class per table; the dataplat.* annotations say where the table lives,
+  how it is partitioned, its grain and the cadence the census expects. Edit here, then `just contracts`.
+prefixes:
+  linkml: https://w3id.org/linkml/
+  {{ package_name }}: https://w3id.org/{{ package_name }}/
+default_prefix: {{ package_name }}
+default_range: string
+imports:
+  - linkml:types
+{% if include_example %}
+slots:
+  event_date:
+    range: date
+    required: true
+    description: UTC date of created_at. The partition key.
+  created_at:
+    range: datetime
+    required: true
+    description: Event time, UTC.
+  user_id:
+    description: >-
+      Opaque user reference. Holds three encodings (see docs/project-facts.md); never assume it joins.
+  phone_raw:
+    description: Witness column. The phone exactly as received; repairs never modify it.
+  phone_number:
+    description: normalize_phone(phone_raw). Derived; repairable from phone_raw.
+  song_id:
+    range: integer
+  country_iso:
+    required: true
+    pattern: "^[A-Z]{2,3}$"
+    description: ISO country code; ZZ = unknown.
+  use_type:
+    required: true
+    description: Channel and billing type, e.g. BD_TELCO_*, PS_TELCO_* for telco billing.
+  download_or_stream_count:
+    range: integer
+    required: true
+    minimum_value: 1
+    maximum_value: 1
+    description: >-
+      Constant 1 in all observed history: a row is one event. The bounds turn that fact into a check,
+      so a source change fails loudly instead of silently re-weighting sums.
+  supporting_details:
+    description: Free text from the source.
+
+classes:
+  UsageEvent:
+    description: One row per usage event (download or stream), normalized. An event log, so it has no key.
+    annotations:
+      dataplat.table: usage.events_clean
+      dataplat.partition_by: event_date
+      dataplat.grain: none
+      dataplat.cadence: daily
+      dataplat.expected_start: "2023-01-01"
+    slots:
+      - event_date
+      - created_at
+      - user_id
+      - phone_raw
+      - phone_number
+      - song_id
+      - country_iso
+      - use_type
+      - download_or_stream_count
+      - supporting_details
+{% else %}
+slots: {}
+classes: {}
+{% endif %}

@@ -1,0 +1,62 @@
+"""Daily usage events: CSV drop -> Hamilton DAG -> one lake commit, as a DBOS workflow.
+
+    just cli run-usage-daily --day 2026-09-01               # safe to repeat: same id
+    just cli run-usage-daily --day 2026-09-01 --attempt r2  # recompute deliberately
+
+The step is atomic (one DuckLake transaction: data + run-log row) and idempotent (partition
+overwrite), so DBOS retries cannot double-count.
+"""
+
+from dataclasses import asdict
+from datetime import date, datetime, timedelta
+from typing import Any
+
+from dataplat.lakecore import Lake
+from dataplat.lakecore.write import Writer
+from dataplat.runtime import run_dag, workflow_id
+from dbos import DBOS, SetWorkflowID
+
+from {{ package_name }} import settings
+from {{ package_name }}.sources import usage_csv
+from {{ package_name }}.transforms.usage import events
+from {{ package_name }}.transforms.usage.checks import USAGE_EVENT
+
+PIPELINE = "usage_daily"
+
+
+@DBOS.step(retries_allowed=True, max_attempts=3)
+def build_and_commit(day: str) -> dict[str, Any]:
+    d = date.fromisoformat(day)
+    raw = usage_csv.read_day(settings.source_drop_dir(), d)
+    out = run_dag(events, final=[events.events_clean, events.phone_dirt], inputs={"events_raw": raw})
+    frame, dirt = out[events.events_clean], out[events.phone_dirt]
+    with Lake(settings.lake_config()) as lake:
+        writer = Writer(lake)
+        writer.ensure_table(USAGE_EVENT)
+        receipt = writer.commit_partition(
+            USAGE_EVENT,
+            d,
+            frame,
+            run_id=DBOS.workflow_id or workflow_id(PIPELINE, day),
+            stats={"phone_dirt": dict(dirt.measured)},
+        )
+    return asdict(receipt)
+
+
+@DBOS.workflow()
+def usage_daily(day: str) -> dict[str, Any]:
+    return build_and_commit(day)
+
+
+@DBOS.workflow()
+def usage_daily_scheduled(scheduled_time: datetime, context: Any) -> None:
+    """Yesterday's partition (see pipelines/schedules.py). A missing drop fails this run, and the census
+    shows the gap for a backfill."""
+    yesterday = (scheduled_time - timedelta(days=1)).date().isoformat()
+    with SetWorkflowID(workflow_id(PIPELINE, yesterday)):  # same id as a manual run: never twice
+        usage_daily(yesterday)
+
+
+def run(day: date, *, attempt: str | None = None) -> dict[str, Any]:
+    with SetWorkflowID(workflow_id(PIPELINE, day.isoformat(), attempt=attempt)):
+        return usage_daily(day.isoformat())

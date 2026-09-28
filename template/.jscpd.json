@@ -1,0 +1,10 @@
+{
+  "format": ["python"],
+  "minTokens": 60,
+  "minLines": 6,
+  "ignoreIdentifiers": true,
+  "gitignore": true,
+  "ignore": ["**/_generated/**", "**/.venv/**", "**/tests/**", "**/.trees/**"],
+  "reporters": ["console"],
+  "absolute": false
+}

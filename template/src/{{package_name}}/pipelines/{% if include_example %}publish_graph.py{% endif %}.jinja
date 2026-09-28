@@ -1,0 +1,43 @@
+"""Rebuild the listening graph from the lake, check parity, publish atomically.
+
+The scheduled run waits on data, not the clock. It publishes only when its upstream usage partition is
+in the run log (``partitions_complete``). Otherwise it records ``skipped`` with the evidence, and the
+next run tries again. The schedule order in ``schedules.py`` is a convenience, not a guarantee.
+"""
+
+from datetime import date, datetime, timedelta
+from typing import Any
+
+from dataplat.checks import Verdict
+from dataplat.gate import partitions_complete
+from dataplat.graph import publish
+from dataplat.lakecore import Lake
+from dataplat.runtime import workflow_id
+from dbos import DBOS, SetWorkflowID
+
+from {{ package_name }} import settings
+from {{ package_name }}.contracts._generated.tables import USAGE_EVENT
+from {{ package_name }}.graph import listening
+
+
+@DBOS.step()
+def build_and_publish(require_day: str | None) -> dict[str, Any]:
+    with Lake(settings.lake_config()) as lake, lake.reader() as reader:
+        if require_day is not None:
+            day = date.fromisoformat(require_day)
+            upstream = partitions_complete(USAGE_EVENT, day, day).evaluate(reader)
+            if upstream.verdict is not Verdict.PASS:
+                return {"status": "skipped", "snapshot": reader.snapshot, "evidence": upstream.to_dict()}
+        return {"status": "published", **publish(listening.SPEC, reader, settings.graph_dir())}
+
+
+@DBOS.workflow()
+def graph_publish(require_day: str | None = None) -> dict[str, Any]:
+    return build_and_publish(require_day)
+
+
+@DBOS.workflow()
+def graph_publish_scheduled(scheduled_time: datetime, context: Any) -> None:
+    upstream = (scheduled_time - timedelta(days=1)).date().isoformat()
+    with SetWorkflowID(workflow_id("graph_publish", scheduled_time.date().isoformat())):
+        graph_publish(upstream)

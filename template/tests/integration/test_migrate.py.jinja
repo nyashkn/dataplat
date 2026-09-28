@@ -1,0 +1,36 @@
+"""Frozen history is adopted in place from a manifest, counted, and never registered twice."""
+
+from pathlib import Path
+
+import polars as pl
+from dataplat.contracts import Column, TableContract
+from dataplat.lakecore import connect
+
+from {{ package_name }} import settings
+from {{ package_name }}.pipelines import migrate
+
+LEGACY = TableContract(
+    "LegacyDaily",
+    "legacy.daily",
+    (Column("day", "date", required=True), Column("n", "int64")),
+    partition_by="day",
+)
+
+
+def test_register_frozen_from_manifest(project_env: Path) -> None:
+    root = project_env / "old_lake"
+    rows = []
+    for day, n in (("2023-08-01", 3), ("2023-08-02", 5)):
+        f = root / f"day={day}" / "part-0.parquet"
+        f.parent.mkdir(parents=True)
+        pl.DataFrame({"n": list(range(n))}, schema={"n": pl.Int64}).write_parquet(f)
+        rows.append({"partition": day, "file": str(f), "rows": n})
+    manifest = project_env / "manifest.csv"
+    pl.DataFrame(rows).write_csv(manifest)
+
+    receipts = migrate.register_frozen(LEGACY, manifest, run_tag="migrate-test")
+    assert [r["rows"] for r in receipts] == [3, 5]
+    again = migrate.register_frozen(LEGACY, manifest, run_tag="migrate-test-2")
+    assert {r["mode"] for r in again} == {"skipped-present"}
+    with connect(settings.lake_config()) as lake:
+        assert sorted(lake.files(LEGACY)) == sorted(r["file"] for r in rows)  # adopted in place

@@ -1,0 +1,34 @@
+"""Usage metrics. Every measure is defined here once; ratios are built from parts (``Rate``), never averaged.
+
+``download_or_stream_count`` is constant 1 (contract bounds), so ``events`` is ``count()``. Summing that
+column would read as "weighted" when it is not.
+"""
+
+from typing import Any
+
+from boring_semantic_layer import to_semantic_table
+from dataplat.lakecore import Reader
+
+from {{ package_name }}.contracts._generated import tables
+from {{ package_name }}.transforms.usage.checks import TELCO_PREFIXES
+
+EVENTS = tables.USAGE_EVENT
+
+
+def usage_events(reader: Reader) -> Any:
+    """Semantic table over usage events at the reader's pinned snapshot."""
+    t = reader.ibis().table(EVENTS.table_name, database=EVENTS.schema_name)
+    is_telco = t.use_type.startswith(TELCO_PREFIXES[0]) | t.use_type.startswith(TELCO_PREFIXES[1])
+    return (
+        to_semantic_table(t, name="usage_events")
+        .with_dimensions(
+            event_date=lambda t: t.event_date,
+            country=lambda t: t.country_iso,
+            use_type=lambda t: t.use_type,
+        )
+        .with_measures(
+            events=lambda t: t.count(),
+            telco_events=lambda t: is_telco.sum(),
+            listeners=lambda t: t.user_id.nunique(),
+        )
+    )

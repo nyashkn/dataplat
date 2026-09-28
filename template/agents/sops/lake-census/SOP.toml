@@ -1,0 +1,12 @@
+name = "lake-census"
+description = "Report what the lake holds: partitions, rows, gaps, zero-row days, lag, run-log agreement (counts only)."
+version = "1.0.0"
+max_concurrent = 1
+admission_policy = "coalesce"
+
+[[triggers]]
+type = "manual"
+
+[[triggers]]
+type = "cron"
+expression = "0 5 * * *"

@@ -1,0 +1,25 @@
+from datetime import date
+from pathlib import Path
+
+import pytest
+
+from {{ package_name }}.sources import usage_csv
+
+from tests.fixtures.synthetic import write_drop
+
+DAY = date(2026, 9, 1)
+
+
+def test_reads_all_strings_by_computed_name(tmp_path: Path) -> None:
+    write_drop(tmp_path, DAY, n=10)
+    df = usage_csv.read_day(tmp_path, DAY)
+    assert df.height == 10 and set(df.schema.values()) == {df.schema["created_at"]}  # every column is text
+
+
+def test_missing_day_and_changed_header_are_errors(tmp_path: Path) -> None:
+    with pytest.raises(FileNotFoundError, match="usage_2026-09-01.csv"):
+        usage_csv.read_day(tmp_path, DAY)
+    path = write_drop(tmp_path, DAY, n=2)
+    path.write_text(path.read_text().replace("user_phone", "msisdn", 1))
+    with pytest.raises(ValueError, match="header"):
+        usage_csv.read_day(tmp_path, DAY)

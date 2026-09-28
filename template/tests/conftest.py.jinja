@@ -1,0 +1,39 @@
+"""Shared fixtures. Tests use synthetic data only (tests/fixtures/synthetic.py), never real rows."""
+
+import os
+from collections.abc import Iterator
+from pathlib import Path
+from typing import Any
+
+import pytest
+
+# Production data checks run only on the box (just verify-prod), never in CI or on laptops.
+collect_ignore = [] if os.environ.get("DATAPLAT_ON_BOX") == "1" else ["prod"]
+
+
+@pytest.fixture
+def project_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Point the whole project (``settings.*``) at a throwaway lake, drop directory and graph directory."""
+    monkeypatch.setenv("DATAPLAT_CATALOG", f"duckdb:{tmp_path}/lake/catalog/meta.ducklake")
+    monkeypatch.setenv("DATAPLAT_DATA_PATH", f"{tmp_path}/lake/data/")
+    monkeypatch.setenv("DATAPLAT_NS", "test")
+    monkeypatch.setenv("DATAPLAT_CODE_VERSION", "test")
+    monkeypatch.setenv("DBOS_SYSTEM_DATABASE_URL", f"sqlite:///{tmp_path}/dbos.sqlite")
+    monkeypatch.setenv("GRAPH_DIR", str(tmp_path / "graphs"))
+    monkeypatch.setenv("SOURCE_DROP_DIR", str(tmp_path / "drop"))
+    (tmp_path / "drop").mkdir()
+    return tmp_path
+
+
+@pytest.fixture
+def dbos_app(project_env: Path) -> Iterator[Any]:
+    """DBOS launched for this project (system database in the temp dir), destroyed after the test."""
+    from dbos import DBOS
+
+    from {{ package_name }} import settings
+
+    settings.launch_dbos(role="worker")  # tests execute queued work in-process
+    try:
+        yield DBOS
+    finally:
+        DBOS.destroy(destroy_registry=False)

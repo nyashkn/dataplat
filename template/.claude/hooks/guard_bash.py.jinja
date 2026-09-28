@@ -1,0 +1,74 @@
+#!/usr/bin/env python3
+"""PreToolUse hook for Bash: block commands that expose secrets, skip the gates, or approve actions.
+
+Permission deny rules match only command prefixes. This hook matches a command word anywhere: after
+``;``, ``&&``, ``|``, ``(``, ``$(``, a backtick, ``--`` (as in ``infisical run -- env``), or wrappers like
+``sudo``/``exec``/``xargs``. Exit code 2 blocks the call and shows stderr to the agent. Stdlib only:
+this runs with the system python3. The patterns are live-fired in tests/architecture/test_gates.py.
+"""
+
+import json
+import re
+import sys
+
+# A position where a new command word can start.
+CMD = r"(?:^|[;&|(`]|\$\(|\s--\s|\b(?:sudo|exec|nohup|time|command|builtin|xargs|env\s+-i)\s)\s*"
+END = r"\s*(?:$|[|;&>)`])"
+
+RULES: list[tuple[re.Pattern[str], str]] = [
+    (re.compile(CMD + r"printenv\b"), "printing the environment exposes secrets"),
+    (re.compile(CMD + r"env(?:\s+-0|\s+--null)?" + END), "printing the environment exposes secrets"),
+    (
+        re.compile(CMD + r"(?:set|export(?:\s+-p)?|declare\s+-[a-z]*[xp][a-z]*|compgen\s+-e)" + END),
+        "dumping shell variables exposes secrets",
+    ),
+    (re.compile(r"/proc/[^\s]*/environ"), "reading process environments exposes secrets"),
+    (
+        re.compile(r"\binfisical\s+(?:secrets|export)\b"),
+        "listing or exporting secrets; use `infisical run -- <cmd>` for the command that needs them",
+    ),
+    (re.compile(r"\baws\s+configure\s+(?:get|export-credentials)\b"), "reading cloud credentials"),
+    (
+        re.compile(r"(?:^|[\s'\"=/<])\.env(?:\.local|\.prod|\.production|\.staging)?(?:\s|$|['\";|&)])"),
+        "reading .env files (they may hold secrets); read .env.example instead",
+    ),
+    (
+        re.compile(r"\bgit\b[^;&|]*\bpush\b[^;&|]*\s(?:-f|--force)(?:\s|$)"),
+        "force-push rewrites shared history; use --force-with-lease on your own branch",
+    ),
+    (
+        re.compile(r"\bgit\b[^;&|]*\bcommit\b[^;&|]*\s-[a-zA-Z]*n[a-zA-Z]*(?:\s|$)"),
+        "skipping the pre-commit gates (-n)",
+    ),
+    (re.compile(r"\bgit\b[^;&|]*--no-verify\b"), "skipping the git hooks (--no-verify)"),
+    (re.compile(r"(?:^|\s)SKIP=\S*\s+git\b"), "skipping pre-commit hooks (SKIP=)"),
+    (re.compile(r"core\.hooksPath"), "redirecting git hooks away from the gates"),
+    (
+        re.compile(r"\b(?:{{ cli_name }}|just\s+cli)\b[^;&|]*\bapprove\b"),
+        "approving actions is a human decision; ask the owner to approve",
+    ),
+]
+
+
+def check(command: str) -> str | None:
+    for pattern, why in RULES:
+        if pattern.search(command):
+            return why
+    return None
+
+
+def main() -> int:
+    try:
+        payload = json.load(sys.stdin)
+    except json.JSONDecodeError:
+        return 0
+    command = str(payload.get("tool_input", {}).get("command", ""))
+    why = check(command)
+    if why is None:
+        return 0
+    print(f"Blocked by .claude/hooks/guard_bash.py: {why}.", file=sys.stderr)
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -1,0 +1,34 @@
+---
+name: new-dataset
+description: Add a new lake table end to end (contract, source, transform, checks with live-fire, pipeline, tests, census). Use when asked to ingest, materialize or add a dataset or table.
+---
+
+# Add a dataset
+
+Work in your own worktree (`just worktree <topic>`) unless you already are in one.
+
+1. **Search first.** Is there a table, transform or check that already does part of this? Use code
+   search (gitnexus `query`, or grep) and the jscpd MCP tool `check_duplication` on any helper you are
+   about to write. Extend what exists rather than adding a sibling.
+2. **Contract.** Add a class to `src/{{ package_name }}/contracts/tables.yaml` with the annotations
+   `dataplat.table` (`<schema>.<table>`), `dataplat.partition_by`, `dataplat.grain` (`none` for event
+   logs), `dataplat.cadence`, `dataplat.expected_start`. Keep the raw value of anything you normalize in
+   a witness column (for example `phone_raw` next to `phone_number`). Run `just contracts`.
+3. **Source** (`sources/`): read the external system into a polars frame of **strings** with an
+   explicit schema. No type inference, no lake access, no listing: compute file names or use a
+   manifest.
+4. **Transform** (`transforms/<domain>/`): pure Hamilton functions (polars in, polars out). Parse types
+   explicitly. Put `@check_output_custom(PanderaPolars(CONTRACT.pandera_schema()))` on the output node.
+   Do not add `from __future__ import annotations` in Hamilton modules.
+5. **Checks** (`transforms/<domain>/checks.py`): each business rule is an `@check` returning a polars
+   expression (True = valid). Thresholds are named constants with an origin comment. Every check gets
+   a live-fire test: `assert_catches(check, clean, mutation)`.
+6. **Pipeline** (`pipelines/`): one `@DBOS.step` that builds the frame and makes **one**
+   `Writer.commit_partition` call. Wrap it in a `@DBOS.workflow`, and run it under
+   `SetWorkflowID(workflow_id("<name>", day))`. Record dirt counts in `stats`.
+7. **Tests**: unit tests for the transforms and checks (synthetic data only, never real rows); an
+   integration test that runs the workflow twice on a temp lake and asserts the second run changes
+   nothing.
+8. **Prove it**: run `just ci`. Paste its tail and `just census` (counts only) into the PR template.
+
+The worked example in `src/{{ package_name }}/pipelines/usage_daily.py` follows every step.

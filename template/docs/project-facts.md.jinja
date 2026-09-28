@@ -1,0 +1,19 @@
+# Project facts
+
+What is true about {{ project_name }}'s data, measured. Each fact records how it was measured and when.
+Agents read this before touching data. Keep it to counts, rates and shapes; no identifiers.
+
+## Sources
+<!-- system, owner, access path, cadence, known quirks -->
+
+## Datasets
+<!-- dataset, grain, partitions, first/last partition, rows, notes -->
+
+## Identity and joins
+<!-- which keys join, at what rate, and why -->
+
+## Known discontinuities
+<!-- dates where behaviour changes, and the cause if known -->
+
+## Restricted fields
+<!-- fields that must never enter the lake or reach an agent: listed in [tool.dataplat] forbidden_columns -->
