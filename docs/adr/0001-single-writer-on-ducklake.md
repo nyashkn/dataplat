@@ -3,7 +3,7 @@
 - Status: accepted
 
 ## Context
-mdundo-pipeline wrote Parquet from seven places, each with its own S3 helpers (`_split_s3`,
+The previous pipeline wrote Parquet from seven places, each with its own S3 helpers (`_split_s3`,
 `_make_s3_fs`, `_move_or_copy`, ...). A partition's existence was inferred by listing RustFS, which
 truncates at about 501 entries. There was no record of which run produced which partition.
 

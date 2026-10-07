@@ -47,5 +47,5 @@ def test_workflow_ids_are_deterministic_and_safe() -> None:
 
 
 def test_dbos_config_namespaces_the_app() -> None:
-    c = dbos_config("mdundo", system_database_url="sqlite:///x", code_version="abc", namespace="feat_x")
-    assert c["name"] == "mdundo-feat_x" and c["application_version"] == "abc"
+    c = dbos_config("example", system_database_url="sqlite:///x", code_version="abc", namespace="feat_x")
+    assert c["name"] == "example-feat_x" and c["application_version"] == "abc"

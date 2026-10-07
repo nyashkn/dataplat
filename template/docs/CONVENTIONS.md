@@ -33,7 +33,7 @@ The **origin** says why the rule exists. Rules without an incident behind them d
 | 20 | Claims say *measured* (command + snapshot) or *implied* (code) | judgment | PR template evidence section | audits that "confirmed" what code implied |
 | 21 | Counts, rates and shape classes only; no raw identifiers in output, logs or files | judgment | `shape_counts`, Evidence types make it easy | PII exposure risk in agent transcripts |
 | 22 | Inconclusive is an answer; blocked metrics are NULL, never 0 | judgment (+ gate) | `dataplat.gate` preconditions, `Rate.value` | fake zeros read as "nothing happened" |
-| 23 | Know the grain before any SUM; ratios via `Rate` | judgment | contracts declare `dataplat.grain` | summing quote revisions turned $11k into $567k |
+| 23 | Know the grain before any SUM; ratios via `Rate` | judgment | contracts declare `dataplat.grain` | summing quote revisions turned $10k into $500k |
 | 24 | Repairs recompute from an untouched witness column | enforced for `repair_partition` | writer refuses repairs without a witness | irreversible in-place fixes |
 | 25 | Thresholds are named constants with an origin comment | judgment | — | magic numbers nobody could justify |
 | 26 | Schedules follow data dependencies, not the clock | judgment (+ example) | run-log preconditions; `pipelines/publish_graph.py` waits for its upstream partition | cron ordering by clock (#115) |

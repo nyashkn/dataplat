@@ -53,7 +53,7 @@ def test_from_env_requires_vars_and_refuses_passwords(tmp_path: Path) -> None:
 def test_namespaced_locations_and_no_secrets_in_repr(tmp_path: Path) -> None:
     env = {
         "DATAPLAT_CATALOG": f"duckdb:{tmp_path}/meta.ducklake",
-        "DATAPLAT_DATA_PATH": "s3://lake/mdundo",
+        "DATAPLAT_DATA_PATH": "s3://lake/example",
         "DATAPLAT_NS": "feat_x",
         "AWS_ACCESS_KEY_ID": "AKIAEXAMPLE",
         "AWS_SECRET_ACCESS_KEY": "s3cr3t-value",
@@ -61,7 +61,7 @@ def test_namespaced_locations_and_no_secrets_in_repr(tmp_path: Path) -> None:
     }
     cfg = LakeConfig.from_env(env, cwd=tmp_path)
     assert cfg.attach_uri().endswith("meta.feat_x.ducklake")
-    assert cfg.resolved_data_path() == "s3://lake/mdundo/_ns/feat_x/"
+    assert cfg.resolved_data_path() == "s3://lake/example/_ns/feat_x/"
     assert "s3cr3t" not in repr(cfg) and "AKIA" not in repr(cfg)
     assert "s3cr3t" not in str(cfg.describe())
     pg = LakeConfig("postgres:dbname=lakecat host=/tmp user=lake", "s3://lake/x/", namespace="main")

@@ -29,6 +29,6 @@ render() {  # name example package
   cd "$root"
 }
 
-render example true mdundo_check
+render example true example_check
 render blank false blank_check
 echo "template check: both renders pass just ci"

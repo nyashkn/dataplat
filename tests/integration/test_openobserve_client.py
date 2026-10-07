@@ -72,7 +72,7 @@ class _FakeO2(BaseHTTPRequestHandler):
 @pytest.fixture
 def o2() -> Iterator[tuple[OpenObserve, dict[str, Any]]]:
     server = ThreadingHTTPServer(("127.0.0.1", 0), _FakeO2)
-    unmanaged = {"name": "hand_made", "stream_type": "traces", "stream_name": "mdundo"}
+    unmanaged = {"name": "hand_made", "stream_type": "traces", "stream_name": "example"}
     server.state = {"alerts": {"keep": unmanaged}, "writes": [], "auth": set()}  # type: ignore[attr-defined]
     threading.Thread(target=server.serve_forever, daemon=True).start()
     host, port = server.server_address[:2]
@@ -89,16 +89,16 @@ def o2() -> Iterator[tuple[OpenObserve, dict[str, Any]]]:
 
 def test_apply_is_an_upsert_by_name(o2: tuple[OpenObserve, dict[str, Any]]) -> None:
     client, state = o2
-    alerts = standard_alerts("mdundo")
+    alerts = standard_alerts("example")
     plan = apply(client, alerts, "ops", dry_run=True)
-    assert plan.create == ["mdundo_workflow_failures", "mdundo_new_errors"] and plan.update == []
+    assert plan.create == ["example_workflow_failures", "example_new_errors"] and plan.update == []
     assert plan.unmanaged == ["hand_made"] and state["writes"] == []  # a dry run writes nothing
 
     apply(client, alerts, "ops", dry_run=False)
-    assert state["writes"] == [("POST", "mdundo_workflow_failures"), ("POST", "mdundo_new_errors")]
+    assert state["writes"] == [("POST", "example_workflow_failures"), ("POST", "example_new_errors")]
     again = apply(client, alerts, "ops", dry_run=False)
-    assert again.create == [] and again.update == ["mdundo_workflow_failures", "mdundo_new_errors"]
-    assert state["writes"][-2:] == [("PUT", "mdundo_workflow_failures"), ("PUT", "mdundo_new_errors")]
+    assert again.create == [] and again.update == ["example_workflow_failures", "example_new_errors"]
+    assert state["writes"][-2:] == [("PUT", "example_workflow_failures"), ("PUT", "example_new_errors")]
     assert state["alerts"]["keep"]["name"] == "hand_made"  # never deleted
     assert state["auth"] == {AUTH}
     assert "pw" not in repr(client)
@@ -107,7 +107,7 @@ def test_apply_is_an_upsert_by_name(o2: tuple[OpenObserve, dict[str, Any]]) -> N
 def test_apply_needs_an_existing_destination(o2: tuple[OpenObserve, dict[str, Any]]) -> None:
     client, _ = o2
     with pytest.raises(OpenObserveError, match="destination 'pager' does not exist"):
-        apply(client, standard_alerts("mdundo"), "pager")
+        apply(client, standard_alerts("example"), "pager")
 
 
 def test_client_configuration_errors_are_explicit() -> None:

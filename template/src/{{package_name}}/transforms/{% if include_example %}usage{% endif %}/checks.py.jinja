@@ -1,4 +1,4 @@
-"""Business rules for usage events, ported from mdundo-pipeline ``src/usage/backfill/schema.py``.
+"""Business rules for usage events, ported from an earlier pipeline (``src/usage/backfill/schema.py``).
 
 In the old pipeline these validators were only ever called from a test; production never ran them
 (docs/traps.md). Here they are bound to the contract, so every commit runs them, and each one has a
@@ -13,7 +13,7 @@ from {{ package_name }}.contracts._generated import tables
 TELCO_PREFIXES = ("BD_TELCO_", "PS_TELCO_")
 
 
-@check(origin="mdundo-pipeline backfill/schema.py V6")
+@check(origin="earlier-pipeline backfill/schema.py V6")
 def v6_phone_only_on_telco() -> pl.Expr:
     """V6: phone_number is set only on telco use types (BD_TELCO_*, PS_TELCO_*)."""
     telco = pl.any_horizontal([pl.col("use_type").str.starts_with(p) for p in TELCO_PREFIXES]).fill_null(

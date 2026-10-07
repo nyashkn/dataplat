@@ -3,7 +3,7 @@
 Rules (each exists because of a real incident; see docs/traps.md):
 
 DPA001  file-writing call (``.write_parquet``, ``.to_parquet``, ``.sink_parquet``, ...) outside the
-        writer. Seven hand-rolled Parquet writers drifted apart in mdundo-pipeline.
+        writer. Seven hand-rolled Parquet writers drifted apart in an earlier pipeline.
 DPA002  SQL that writes files (``COPY ... TO '...'``, ``EXPORT DATABASE``). DuckDB makes this one
         line, which is why agents reach for it.
 DPA003  listing storage (``os.listdir``, ``glob``, ``.glob``/``.rglob``/``.iterdir``, ``fs.ls``,

@@ -71,11 +71,11 @@ def test_telemetry_is_off_unless_the_environment_turns_it_on() -> None:
     assert TelemetrySettings.from_env({}) is None
     on = {"OTEL_EXPORTER_OTLP_ENDPOINT": "http://o2:5080/api/default/"}
     assert TelemetrySettings.from_env({**on, "DATAPLAT_TELEMETRY": "off"}) is None
-    s = TelemetrySettings.from_env(on, default_stream="mdundo")
+    s = TelemetrySettings.from_env(on, default_stream="example")
     assert s is not None
     assert s.traces_endpoint == "http://o2:5080/api/default/v1/traces"
     assert s.logs_endpoint == "http://o2:5080/api/default/v1/logs"
-    assert s.headers == {"stream-name": "mdundo"}
+    assert s.headers == {"stream-name": "example"}
 
 
 def test_telemetry_credentials_and_stream() -> None:
@@ -83,12 +83,12 @@ def test_telemetry_credentials_and_stream() -> None:
         "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT": "http://collector:4318/v1/traces",
         "OPENOBSERVE_USER": "ops@example.org",
         "OPENOBSERVE_PASSWORD": "pw",
-        "DATAPLAT_TELEMETRY_STREAM": "dockblocks",
+        "DATAPLAT_TELEMETRY_STREAM": "example",
     }
     s = TelemetrySettings.from_env(env, default_stream="ignored")
     assert s is not None and s.logs_endpoint is None
     assert s.headers["Authorization"] == "Basic " + base64.b64encode(b"ops@example.org:pw").decode()
-    assert s.headers["stream-name"] == "dockblocks"
+    assert s.headers["stream-name"] == "example"
     assert "pw" not in repr(s) and "Basic" not in repr(s)
     explicit = TelemetrySettings.from_env(
         {**env, "OTEL_EXPORTER_OTLP_HEADERS": "Authorization=Basic%20abc,stream-name=raw"}
