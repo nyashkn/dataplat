@@ -1,7 +1,7 @@
 """Rates that aggregate correctly and never fake a zero.
 
-The grain trap: averaging per-group ratios, or summing a column at the wrong grain, turns $11k into
-$567k. A ``Rate`` keeps its numerator and denominator, so combining rates sums both parts first.
+The grain trap: averaging per-group ratios, or summing a column at the wrong grain, turns $10k into
+$500k. A ``Rate`` keeps its numerator and denominator, so combining rates sums both parts first.
 
 The Blocked Metrics rule: when the denominator is 0 the value is NULL (``None``), never 0. A zero would
 claim "we measured nothing happening"; NULL says "we could not measure".

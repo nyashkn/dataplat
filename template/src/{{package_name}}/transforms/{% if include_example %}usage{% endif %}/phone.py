@@ -1,4 +1,4 @@
-"""Phone normalization, ported from mdundo-pipeline ``src/_shared/phone.py:normalize_phone``.
+"""Phone normalization, ported from an earlier pipeline (``src/_shared/phone.py:normalize_phone``).
 
 ``normalize_phone`` (scalar) is the readable specification; ``normalize_phone_expr`` (polars) is what
 pipelines run. ``tests/unit/transforms/usage/test_phone.py`` proves they agree on a synthetic corpus

@@ -6,7 +6,7 @@ a per-run ``_manifest.json`` index — the shape most non-table pipeline outputs
 
 Backed by `obstore <https://developmentseed.org/obstore/>`_: a small Rust-backed object-store client
 (no boto3/s3fs — ``dataplat lint`` DPA-forbidden anywhere outside this module) that talks every
-S3-compatible endpoint through the same API, including RustFS at ``dockblocks-bronze`` (proven live,
+S3-compatible endpoint through the same API, including RustFS at ``example-bronze`` (proven live,
 see ``publish_bytes`` docstring) and Cloudflare R2, plus a local-filesystem backend for tests and dev
 with the identical write-once semantics — no moto/minio dependency needed. Path-style URLs
 (``virtual_hosted_style_request=False``) work with any bucket-in-path S3-compatible host, RustFS

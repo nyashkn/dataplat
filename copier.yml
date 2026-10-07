@@ -20,7 +20,7 @@ _message_after_copy: |
 project_name:
   type: str
   help: Human name of the project
-  default: Mdundo Platform
+  default: Example Platform
 
 package_name:
   type: str

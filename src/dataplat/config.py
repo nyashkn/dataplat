@@ -107,7 +107,7 @@ class LakeConfig:
         except KeyError as missing:
             raise ConfigError(
                 f"{missing.args[0]} is not set. Copy .env.example to .env for local work; "
-                "production values come from Infisical."
+                "production values come from your secret manager."
             ) from None
         if has_password(catalog):
             raise ConfigError("DATAPLAT_CATALOG must not contain a password; libpq reads PGPASSWORD.")

@@ -13,7 +13,7 @@ prevents it.
 | **Leading plus** | Phones arrived as `+255…` (#160, #176) and split identities. | V21 + `normalize_phone` |
 | **Float artifacts** | About 3.83M rows in 2023-08/09 had phones shaped `9{12}.9`, a digit string with a trailing `.0` (#197), after a spreadsheet round-trip. | V24 + normalization, dirt measured on every run |
 | **20 zero-row days** | `fact_charges_topline` (generation 2 of 3) had 20 days with zero rows and no writer anyone could find. | writer refuses empty partitions without a note; census flags zero-row days |
-| **Grain trap** | Summing Dockblocks quote revisions (not quotes) turned $11k into $567k. | `dataplat.grain` in contracts, `Rate`, new-metric skill |
+| **Grain trap** | Summing quote revisions (not quotes) turned a $10k total into $500k. | `dataplat.grain` in contracts, `Rate`, new-metric skill |
 | **Fake zero** | A metric with missing inputs showed 0, read as "nothing happened". | Blocked-metric rule: NULL / Refusal |
 | **Clock-ordered cron** | Jobs ran in clock order, not dependency order (#115), so downstream read yesterday's upstream. | run-log preconditions |
 | **Identity ceiling** | `fact_event.user_id` holds three encodings; only 3.46% joins, and 36% of digit-shaped rows match. | documented in project-facts; no silent joins |

@@ -19,7 +19,7 @@ def test_target_needs_exactly_one_of_root_or_bucket() -> None:
 
 def test_target_needs_s3_config_with_bucket() -> None:
     with pytest.raises(ConfigError):
-        PublishTarget(bucket="dockblocks-bronze")
+        PublishTarget(bucket="example-bronze")
 
 
 def test_publish_bytes_writes_once(tmp_path: Path) -> None:

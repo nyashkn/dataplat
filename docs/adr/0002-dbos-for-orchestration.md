@@ -3,7 +3,7 @@
 - Status: accepted
 
 ## Context
-Dockblocks uses Dagster, which is asset-centric and heavy for this box. Mdundo needs plain-Python
+The existing stack uses Dagster, which is asset-centric and heavy for this box. The new project needs plain-Python
 pipelines, durable retries, schedules, and human-in-the-loop approvals for agent actions (the A&R agent).
 
 ## Decision

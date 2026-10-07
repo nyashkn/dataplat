@@ -22,7 +22,7 @@ than raw `boto3`: it speaks every S3-compatible backend through one API, includi
 identical semantics for tests, and — the reason write-once is safe here at all — a real conditional
 create (`mode="create"`, HTTP `If-None-Match: *`), not a check-then-put race.
 
-## Evidence (probed live against RustFS `dockblocks-bronze`, 2026-09-28)
+## Evidence (probed live against RustFS `example-bronze`, 2026-09-28)
 - `obs.put(store, key, data, mode="create")` on a fresh key succeeds.
 - The same call repeated against the same key returns HTTP 412 Precondition Failed, surfaced by
   obstore as `AlreadyExistsError` and translated here to `PublishExistsError` — RustFS honors
