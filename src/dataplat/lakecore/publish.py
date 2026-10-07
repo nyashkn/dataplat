@@ -103,10 +103,13 @@ def publish_bytes(
     *,
     content_type: str | None = None,
     overwrite: bool = False,
+    idempotent: bool = False,
 ) -> PublishReceipt:
     """Write ``data`` at ``target``'s prefix + ``key``, once.
 
-    Refuses (``PublishExistsError``) if the object already exists, unless ``overwrite=True``. The
+    Refuses (``PublishExistsError``) if the object already exists, unless ``overwrite=True``. With
+    ``idempotent=True`` an existing object holding exactly these bytes counts as done and returns the same
+    receipt (a retry or a replayed workflow step re-writing its own output); different bytes still refuse. The
     refusal is a real conditional-write precondition on S3-compatible targets (an atomic
     ``If-None-Match: *``, no read-then-write race window) and an ``os.O_EXCL``-equivalent exclusive
     create on the local backend.
@@ -119,6 +122,10 @@ def publish_bytes(
     try:
         obs.put(store, full_key, data, mode="overwrite" if overwrite else "create", attributes=attributes)
     except obs_exceptions.AlreadyExistsError as e:
+        if idempotent and bytes(obs.get(store, full_key).bytes()) == data:
+            return PublishReceipt(
+                key=full_key, sha256=hashlib.sha256(data).hexdigest(), bytes=len(data), content_type=content_type
+            )
         raise PublishExistsError(
             f"{full_key} already exists at this publish target; pass overwrite=True to replace it"
         ) from e

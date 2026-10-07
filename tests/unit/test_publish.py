@@ -74,3 +74,14 @@ def test_publish_documents_stops_before_manifest_if_a_document_conflicts(tmp_pat
         publish_documents(target, {"jim.json": b"new", "mike.json": b"new"})
     assert not (tmp_path / "_manifest.json").exists()
     assert not (tmp_path / "mike.json").exists()  # sorted order: jim.json fails before mike.json is written
+
+
+def test_publish_bytes_idempotent_accepts_identical_bytes_but_not_different(tmp_path: Path) -> None:
+    target = PublishTarget(root=tmp_path)
+    first = publish_bytes(target, "k.json", b"one")
+    again = publish_bytes(target, "k.json", b"one", idempotent=True)
+    assert again.sha256 == first.sha256 and again.key == first.key and again.bytes == first.bytes
+    with pytest.raises(PublishExistsError):
+        publish_bytes(target, "k.json", b"two", idempotent=True)
+    with pytest.raises(PublishExistsError):  # idempotent is opt-in
+        publish_bytes(target, "k.json", b"one")

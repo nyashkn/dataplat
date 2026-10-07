@@ -82,7 +82,9 @@ def _datafusion(sql: str, rows: list[tuple[Any, ...]]) -> list[dict[str, Any]]:
         schema=pa.schema([(c, pa.int64() if c == "_timestamp" else pa.string()) for c in cols]),
     )
     ctx = datafusion.SessionContext()
-    ctx.register_record_batches("example", [table.to_batches() or [pa.RecordBatch.from_pylist([], schema=table.schema)]])
+    ctx.register_record_batches(
+        "example", [table.to_batches() or [pa.RecordBatch.from_pylist([], schema=table.schema)]]
+    )
     return ctx.sql(sql).to_arrow_table().to_pylist()
 
 
