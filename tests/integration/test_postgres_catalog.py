@@ -32,7 +32,7 @@ def pg(tmp_path_factory: pytest.TempPathFactory):  # type: ignore[no-untyped-def
 
 
 def test_namespaces_are_isolated_on_postgres(pg: str, tmp_path: Path) -> None:
-    main = LakeConfig(pg, f"{tmp_path}/data/", namespace="main", code_version="t")
+    main = LakeConfig(pg, f"{tmp_path}/data/", namespace="base", code_version="t")
     feat = main.for_namespace("feat_x")
     with Lake(main) as a, Lake(feat) as b:
         wa, wb = Writer(a), Writer(b)
