@@ -34,5 +34,13 @@ test:
 template-check:
     scripts/check_template.sh
 
+# regenerate the code-derived facts in the docs (Cog)
+docs:
+    {{ run }} cog -r -I scripts README.md
+
+# fail if a Cog-generated span was edited by hand or is stale
+docs-check:
+    {{ run }} cog --check -I scripts README.md
+
 # everything CI runs
-ci: lint imports typecheck test template-check
+ci: lint imports docs-check typecheck test template-check

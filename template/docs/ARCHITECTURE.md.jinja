@@ -113,6 +113,15 @@ schedule (no successful run within its cron interval plus grace). The owner appl
 | Nightly | unbounded | full suite, lock drift, dependency audit, duplication report |
 | On the box (owner) | — | `just verify-prod`: run-log vs table agreement, freshness |
 
+## Architecture rules
+
+<!-- [[[cog
+import cog, docfacts as f
+cog.outl(f"`dataplat lint` enforces {len(f.dpa_rules())} rules: {f.code_list(f.dpa_rules())}.")
+]]] -->
+`dataplat lint` enforces 8 rules: `DPA001`, `DPA002`, `DPA003`, `DPA004`, `DPA005`, `DPA006`, `DPA007`, `DPA008`.
+<!-- [[[end]]] -->
+
 ## Decisions
 
 Platform decisions (DuckLake, DBOS, single writer, native graph over Icebug, namespaces, extension

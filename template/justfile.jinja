@@ -84,8 +84,16 @@ dupes-report:
 census:
     {{ run }} {{ cli_name }} census
 
+# regenerate the code-derived facts in the docs (Cog)
+docs:
+    {{ run }} cog -r -I scripts README.md docs/ARCHITECTURE.md
+
+# fail if a Cog-generated span was edited by hand or is stale
+docs-check:
+    {{ run }} cog --check -I scripts README.md docs/ARCHITECTURE.md
+
 # every gate CI runs
-ci: lint imports contracts-check typecheck test-all dupes
+ci: lint imports contracts-check docs-check typecheck test-all dupes
 
 # local OpenObserve (Docker) for traces and logs at http://localhost:5080; credentials from .env
 observe:
