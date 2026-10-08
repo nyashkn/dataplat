@@ -43,8 +43,8 @@ jobs:
       - name: install (exactly uv.lock, including just)
         run: uv sync --locked --all-extras
 
-      - name: static gates (ruff, architecture scanner, import contracts, contract freshness, types)
-        run: uv run --frozen just lint imports contracts-check typecheck
+      - name: static gates (ruff, architecture scanner, import contracts, contract freshness, doc facts, types)
+        run: uv run --frozen just lint imports contracts-check docs-check typecheck
 
       - name: tests
         # Full suite + live-fire gate by default. When the suite gets slow, set the repo variable

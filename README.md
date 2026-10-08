@@ -80,6 +80,29 @@ just ci        # lint, import contracts, mypy, tests, then render both template 
 Tests cover the Postgres catalog (via [pgserver](https://pypi.org/project/pgserver/)), native graph
 builds (real-ladybug), and the multi-process worker/CLI action flow.
 
+## Reference (generated from the code by `just docs`)
+<!-- [[[cog
+import cog, docfacts as f
+cog.outl(f"The architecture scanner enforces {len(f.dpa_rules())} rules: {f.code_list(f.dpa_rules())}.")
+]]] -->
+The architecture scanner enforces 8 rules: `DPA001`, `DPA002`, `DPA003`, `DPA004`, `DPA005`, `DPA006`, `DPA007`, `DPA008`.
+<!-- [[[end]]] -->
+<!-- [[[cog
+cog.outl(f"The `dataplat` CLI has {len(f.cli_subcommands())} subcommands: {f.code_list(f.cli_subcommands())}.")
+]]] -->
+The `dataplat` CLI has 3 subcommands: `contracts`, `lint`, `ns`.
+<!-- [[[end]]] -->
+<!-- [[[cog
+cog.outl(f"Optional extras: {f.code_list(f.extras())}.")
+]]] -->
+Optional extras: `contracts`, `graph`, `semantic`, `telemetry`.
+<!-- [[[end]]] -->
+<!-- [[[cog
+cog.outl(f"Recipes in this repo's justfile: {f.code_list(f.just_recipes())}.")
+]]] -->
+Recipes in this repo's justfile: `ci`, `default`, `docs`, `docs-check`, `imports`, `lint`, `setup`, `template-check`, `test`, `typecheck`.
+<!-- [[[end]]] -->
+
 ## Decisions
 [docs/adr/](docs/adr/): single writer on DuckLake · DBOS · LinkML contracts · lint the architecture,
 not the craft · native graph + parity (Icebug findings) · namespaces · extension wheels · distribution

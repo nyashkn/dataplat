@@ -43,6 +43,7 @@ dev = [
   "pre-commit>=4.6",
   "pgserver>=0.1.4",
   "rust-just==1.58.0",
+  "cogapp>=3.6.0",
 ]
 
 [build-system]

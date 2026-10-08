@@ -26,3 +26,10 @@ dependencies is the one CI and the git hooks call (`uv run --frozen just ...`).
 
 Production runs on the box. Secrets come from Infisical (`infisical run -- just ...`) and are never
 stored in files. Data checks against the production lake run only there (`just verify-prod`).
+
+<!-- [[[cog
+import cog, docfacts as f
+cog.outl(f"Recipes: {f.code_list(f.just_recipes())}.")
+]]] -->
+Recipes: `alerts`, `bootstrap`, `census`, `ci`, `cli`, `contracts`, `contracts-check`, `default`, `docs`, `docs-check`, `dupes`, `dupes-report`, `fmt`, `imports`, `lint`, `observe`, `observe-down`, `setup`, `setup-ci`, `test`, `test-all`, `typecheck`, `verify-prod`, `worktree`.
+<!-- [[[end]]] -->

@@ -28,7 +28,7 @@ jobs:
         with:
           node-version: "22"
       - run: uv sync --locked --all-extras
-      - run: uv run --frozen just lint imports typecheck
+      - run: uv run --frozen just lint imports docs-check typecheck
       - run: uv run --frozen just test
       - name: rendered projects pass their own just ci
         run: uv run --frozen just template-check
