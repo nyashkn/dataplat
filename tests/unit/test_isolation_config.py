@@ -50,7 +50,8 @@ def test_from_env_requires_vars_and_refuses_passwords(tmp_path: Path) -> None:
         )
 
 
-def test_namespaced_locations_and_no_secrets_in_repr(tmp_path: Path) -> None:
+def test_namespaced_locations_and_no_secrets_in_repr(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(isolation, "linked_worktree_name", lambda cwd=None: None)  # main ns is refused in worktrees
     env = {
         "DATAPLAT_CATALOG": f"duckdb:{tmp_path}/meta.ducklake",
         "DATAPLAT_DATA_PATH": "s3://lake/example",
